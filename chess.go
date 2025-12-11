@@ -20,10 +20,14 @@ func init() {
 }
 
 type ChessConfig struct {
+	PieceFinder string `json:"piece-finder"`
 }
 
 func (cfg *ChessConfig) Validate(path string) ([]string, []string, error) {
-	return nil, nil, nil
+	if cfg.PieceFinder == "" {
+		return nil, nil, fmt.Errorf("need a piece-finder")
+	}
+	return []string{cfg.PieceFinder}, nil, nil
 }
 
 type viamChessChess struct {

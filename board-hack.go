@@ -18,6 +18,7 @@ import (
 	"go.viam.com/rdk/pointcloud"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/rimage"
+	"go.viam.com/rdk/robot/framesystem"
 	"go.viam.com/rdk/services/vision"
 	viz "go.viam.com/rdk/vision"
 	"go.viam.com/rdk/vision/classification"
@@ -78,6 +79,11 @@ func NewBoardCameraHack(ctx context.Context, deps resource.Dependencies, name re
 		return nil, err
 	}
 
+	bc.rfs, err = framesystem.FromDependencies(deps)
+	if err != nil {
+		logger.Errorf("can't get framesystem: %v", err)
+	}
+
 	return bc, nil
 }
 
@@ -89,6 +95,7 @@ type BoardCameraHack struct {
 	conf   *BoardCameraHackConfig
 	logger logging.Logger
 
+	rfs   framesystem.Service
 	input camera.Camera
 	props camera.Properties
 }
@@ -271,10 +278,12 @@ func (bc *BoardCameraHack) GetObjectPointClouds(ctx context.Context, cameraName 
 	objs := []*viz.Object{}
 
 	for _, s := range squares {
-		if s.color == 0 {
-			continue
+		pc, err := bc.rfs.TransformPointCloud(ctx, s.pc, bc.conf.Input, "world")
+		if err != nil {
+			return nil, err
 		}
-		o, err := viz.NewObjectWithLabel(s.pc, fmt.Sprintf("%s-%d", s.name, s.color), nil)
+
+		o, err := viz.NewObjectWithLabel(pc, fmt.Sprintf("%s-%d", s.name, s.color), nil)
 		if err != nil {
 			return nil, err
 		}
