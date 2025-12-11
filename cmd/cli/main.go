@@ -26,6 +26,10 @@ func realMain() error {
 
 	host := flag.String("host", "", "host")
 	debug := flag.Bool("debug", false, "")
+	cmd := flag.String("cmd", "", "host")
+
+	from := flag.String("from", "", "")
+	to := flag.String("to", "", "")
 
 	flag.Parse()
 
@@ -37,7 +41,15 @@ func realMain() error {
 		return fmt.Errorf("need a host")
 	}
 
-	cfg := viamchess.ChessConfig{}
+	if *cmd == "" {
+		return fmt.Errorf("need command")
+	}
+
+	cfg := viamchess.ChessConfig{
+		PieceFinder: "piece-finder",
+		Gripper:     "gripper",
+		PoseStart:   "hack-pose-look-straight-down",
+	}
 	_, _, err := cfg.Validate("")
 	if err != nil {
 		return err
@@ -59,6 +71,20 @@ func realMain() error {
 		return err
 	}
 	defer thing.Close(ctx)
+
+	switch *cmd {
+	case "move":
+		res, err := thing.DoCommand(ctx, map[string]interface{}{
+			"move": map[string]interface{}{"from": *from, "to": *to},
+		})
+		if err != nil {
+			return err
+		}
+		logger.Infof("res: %v", res)
+		return nil
+	default:
+		return fmt.Errorf("unknown command [%s]", *cmd)
+	}
 
 	return nil
 }
