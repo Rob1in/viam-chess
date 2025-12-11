@@ -243,6 +243,10 @@ github.com/envoyproxy/go-control-plane v0.9.10-0.20210907150352-cf90f659a021/go.
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/erh/vmodutils v0.3.2 h1:hlVsavwYt4qLu9U7yHCXbK1MFtxgiuFNWllZo48U1HY=
 github.com/erh/vmodutils v0.3.2/go.mod h1:S02rhskBbRSjQwkJYe8XSC4nd1ahwKeVL8F2+DGeiM4=
+github.com/erh/vmodutils v0.3.3 h1:R6M9LeQXXc+8ANTSGe5sQY+XJu224SQeoO13ZkL3FDQ=
+github.com/erh/vmodutils v0.3.3/go.mod h1:5qzDTFFy8fb1AppDiLIdK5dvD9lWKjHDngC7p4h6cMY=
+github.com/erh/vmodutils v0.3.4 h1:9rN0pR6XeObnJopXKGF4I6G3e/oYsNtQe8G1jVAI4ZE=
+github.com/erh/vmodutils v0.3.4/go.mod h1:5qzDTFFy8fb1AppDiLIdK5dvD9lWKjHDngC7p4h6cMY=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f h1:Y/CXytFA4m6baUTXGLOoWe4PQhGxaX0KpnayAqC48p4=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f/go.mod h1:vw97MGsxSvLiUE2X8qFplwetxpGLQrlU1Q9AUEIzCaM=
 github.com/erikstmartin/go-testdb v0.0.0-20160219214506-8d10e4a1bae5 h1:Yzb9+7DPaBjB8zlTR87/ElzFsnQfuHnVUVqpZZIcV5Y=

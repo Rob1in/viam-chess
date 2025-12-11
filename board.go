@@ -6,19 +6,24 @@ import (
 	"image"
 	"image/color"
 
+	"github.com/golang/geo/r3"
+
+	"github.com/erh/vmodutils/touch"
 	"github.com/lucasb-eyer/go-colorful"
+
 	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/data"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/pointcloud"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/rimage"
 	"go.viam.com/rdk/spatialmath"
 )
 
 var BoardCameraModel = family.WithModel("board-camera")
 
 func init() {
-	resource.RegisterComponent(camera.API, ChessModel,
+	resource.RegisterComponent(camera.API, BoardCameraModel,
 		resource.Registration[camera.Camera, *BoardCameraConfig]{
 			Constructor: newBoardCamera,
 		},
@@ -87,7 +92,6 @@ func (bc *BoardCamera) Images(ctx context.Context, filterSourceNames []string, e
 		return nil, rm, fmt.Errorf("no images returned from input camera")
 	}
 
-	// create new image of same size as the first image in ni
 	srcImg, err := ni[0].Image(ctx)
 	if err != nil {
 		return nil, rm, err
@@ -116,7 +120,8 @@ func BoardDebugImage(srcImg image.Image) (image.Image, error) {
 			origColor := srcImg.At(x, y)
 			cf, ok := colorful.MakeColor(origColor)
 			if !ok {
-				return nil, fmt.Errorf("bad color: %v", origColor)
+				fmt.Printf("bad color: %v\n", origColor)
+				continue
 			}
 			h, _, _ := cf.Hsv()
 			newColor := colorful.Hsv(h, 1, 1)
@@ -146,6 +151,40 @@ func BoardDebugImage(srcImg image.Image) (image.Image, error) {
 	}
 
 	return dst, nil
+}
+
+func BoardDebugImage2(in pointcloud.PointCloud) (image.Image, error) {
+	md := in.MetaData()
+
+	xSize := md.MaxX - md.MinX
+	ySize := md.MaxY - md.MinY
+
+	fmt.Printf("xSize: %0.2f ySize: %0.2f\n", xSize, ySize)
+
+	for col := 0.0; col < 8; col++ {
+		for row := 0.0; row < 8; row++ {
+			n := touch.PCCrop(
+				in,
+				r3.Vector{
+					md.MinX + (row * (xSize / 8)),
+					md.MinY + (col * (ySize / 8)),
+					30,
+				},
+				r3.Vector{
+					md.MinX + ((row + 1) * (xSize / 8)),
+					md.MinY + ((col + 1) * (ySize / 8)),
+					100,
+				},
+			)
+
+			img := touch.PCToImage(n)
+			err := rimage.WriteImageToFile(fmt.Sprintf("test-%d-%d.jpg", int(row), int(col)), img)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+	panic(1)
 }
 
 func (bc *BoardCamera) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {

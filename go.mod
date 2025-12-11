@@ -3,7 +3,7 @@ module viamchess
 go 1.25.1
 
 require (
-	github.com/erh/vmodutils v0.3.2
+	github.com/erh/vmodutils v0.3.4
 	go.viam.com/rdk v0.105.0
 )
 

@@ -30,3 +30,6 @@ go.work.sum
 # Build outputs
 bin
 *tar.gz
+
+test*.jpg
+hack-test.jpg   
