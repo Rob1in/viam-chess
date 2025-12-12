@@ -601,7 +601,7 @@ func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess
 		multiplier = float64(s.skillAdjust) / 50.0
 		s.logger.Infof("multiplier: %v", multiplier)
 	} else if s.skillAdjust > 50 {
-		multiplier = float64(s.skillAdjust-50) / 2
+		multiplier = float64(s.skillAdjust-50) * 2
 		s.logger.Infof("multiplier: %v", multiplier)
 	}
 
