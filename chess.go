@@ -316,17 +316,30 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			return err
 		}
 
-		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, useZ})
-		if err != nil {
-			return err
-		}
+		for {
+			err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, useZ})
+			if err != nil {
+				return err
+			}
 
-		got, err := s.gripper.Grab(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if !got {
-			return fmt.Errorf("Grab didn't grab")
+			got, err := s.gripper.Grab(ctx, nil)
+			if err != nil {
+				return err
+			}
+			if got {
+				break
+			}
+			s.logger.Warnf("didn't grab, going to try a little more")
+			useZ -= 10
+			if useZ < 0 { // todo: magic number
+				return fmt.Errorf("couldn't grab, and scared to go lower")
+			}
+
+			err = s.setupGripper(ctx)
+			if err != nil {
+				return err
+			}
+
 		}
 
 		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, safeZ})
@@ -470,6 +483,10 @@ func (s *viamChessChess) makeAMove(ctx context.Context) (*chess.Move, error) {
 	m, err := s.pickMove(ctx, game)
 	if err != nil {
 		return nil, err
+	}
+
+	if m.HasTag(chess.KingSideCastle) || m.HasTag(chess.QueenSideCastle) {
+		return nil, fmt.Errorf("can't handle castle %v", m)
 	}
 
 	all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
