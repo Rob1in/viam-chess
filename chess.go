@@ -2,6 +2,7 @@ package viamchess
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"os"
@@ -161,7 +162,7 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 		return nil, err
 	}
 
-	s.fenFile = os.Getenv("VIAM_MODULE_DATA") + "fen.txt"
+	s.fenFile = os.Getenv("VIAM_MODULE_DATA") + "state.json"
 	s.logger.Infof("fenFile: %v", s.fenFile)
 	s.engine, err = uci.New("stockfish")
 	if err != nil {
@@ -226,7 +227,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 				return nil, err
 			}
 
-			err = s.movePiece(ctx, all, from, to)
+			err = s.movePiece(ctx, all, nil, from, to, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -279,9 +280,24 @@ func (s *viamChessChess) findDetection(data viscapture.VisCapture, pos string) o
 	return nil
 }
 
-func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string) (r3.Vector, error) {
+func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) (r3.Vector, error) {
+	f := 1 + (pos % 8)
+	ex := 1 + (pos / 8)
+
+	k := fmt.Sprintf("a%d", f)
+	oo := s.findObject(data, k)
+	if oo == nil {
+		return r3.Vector{}, fmt.Errorf("why no object for %s", k)
+	}
+
+	md := oo.MetaData()
+	return r3.Vector{md.Center().X, md.Center().Y - float64(ex*100), md.Center().Z}, nil
+
+}
+
+func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, theState *state) (r3.Vector, error) {
 	if pos == "-" {
-		return r3.Vector{400, -400, 400}, nil
+		return s.graveyardPosition(data, len(theState.graveyard))
 	}
 
 	o := s.findObject(data, pos)
@@ -304,7 +320,7 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string) (r
 	}, nil
 }
 
-func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, from, to string) error {
+func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, theState *state, from, to string, m *chess.Move) error {
 	s.logger.Infof("movePiece called: %s -> %s", from, to)
 	if to != "-" { // check where we're going
 		o := s.findObject(data, to)
@@ -313,8 +329,16 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		}
 
 		if !strings.HasSuffix(o.Geometry.Label(), "-0") {
-			s.logger.Infof("position %s already has a piece (%s), will move", to, o.Geometry.Label())
-			err := s.movePiece(ctx, data, to, "-")
+
+			what := "?"
+
+			if theState != nil {
+				pc := theState.game.Position().Board().Piece(m.S2())
+				theState.graveyard = append(theState.graveyard, int(pc))
+			}
+
+			s.logger.Infof("position %s already has a piece (%s) (%s), will move", to, what, o.Geometry.Label())
+			err := s.movePiece(ctx, data, theState, to, "-", nil)
 			if err != nil {
 				return fmt.Errorf("can't move piece out of the way: %w", err)
 			}
@@ -324,7 +348,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	useZ := 100.0
 
 	{
-		center, err := s.getCenterFor(data, from)
+		center, err := s.getCenterFor(data, from, theState)
 		if err != nil {
 			return err
 		}
@@ -373,7 +397,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	}
 
 	{
-		center, err := s.getCenterFor(data, to)
+		center, err := s.getCenterFor(data, to, theState)
 		if err != nil {
 			return err
 		}
@@ -383,9 +407,6 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			return err
 		}
 
-		if to == "-" { // TODO: temp hack
-			useZ = 300
-		}
 		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, useZ})
 		if err != nil {
 			return err
@@ -452,23 +473,48 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 	return err
 }
 
-func (s *viamChessChess) getGame(ctx context.Context) (*chess.Game, error) {
+type state struct {
+	game      *chess.Game
+	graveyard []int
+}
+
+type savedState struct {
+	FEN       string `json:"fen"`
+	Graveyard []int  `json:"graveyard"`
+}
+
+func (s *viamChessChess) getGame(ctx context.Context) (*state, error) {
 	data, err := os.ReadFile(s.fenFile)
 	if os.IsNotExist(err) {
-		return chess.NewGame(), nil
+		return &state{chess.NewGame(), []int{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error reading fen (%s) %T", s.fenFile, err)
 	}
-	f, err := chess.FEN(string(data))
+
+	ss := savedState{}
+	err = json.Unmarshal(data, &ss)
+	if err != nil {
+		return nil, fmt.Errorf("cannot unmarshal json")
+	}
+
+	f, err := chess.FEN(ss.FEN)
 	if err != nil {
 		return nil, fmt.Errorf("invalid fen from (%s) (%s) %w", s.fenFile, data, err)
 	}
-	return chess.NewGame(f), nil
+	return &state{chess.NewGame(f), ss.Graveyard}, nil
 }
 
-func (s *viamChessChess) saveGame(ctx context.Context, g *chess.Game) error {
-	return os.WriteFile(s.fenFile, []byte(g.FEN()), 0666)
+func (s *viamChessChess) saveGame(ctx context.Context, theState *state) error {
+	ss := savedState{
+		FEN:       theState.game.FEN(),
+		Graveyard: theState.graveyard,
+	}
+	b, err := json.MarshalIndent(&ss, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.fenFile, b, 0666)
 }
 
 func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess.Move, error) {
@@ -497,18 +543,14 @@ func (s *viamChessChess) makeAMove(ctx context.Context) (*chess.Move, error) {
 		return nil, fmt.Errorf("can't go home: %v", err)
 	}
 
-	game, err := s.getGame(ctx)
+	theState, err := s.getGame(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	m, err := s.pickMove(ctx, game)
+	m, err := s.pickMove(ctx, theState.game)
 	if err != nil {
 		return nil, err
-	}
-
-	if m.HasTag(chess.KingSideCastle) || m.HasTag(chess.QueenSideCastle) {
-		return nil, fmt.Errorf("can't handle castle %v", m)
 	}
 
 	all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
@@ -516,17 +558,56 @@ func (s *viamChessChess) makeAMove(ctx context.Context) (*chess.Move, error) {
 		return nil, err
 	}
 
-	err = s.movePiece(ctx, all, m.S1().String(), m.S2().String())
+	if m.HasTag(chess.KingSideCastle) || m.HasTag(chess.QueenSideCastle) {
+		var f, t string
+		switch m.S1().String() {
+		case "e1":
+			switch m.S2().String() {
+			case "g1":
+				f = "h1"
+				t = "f1"
+			case "a1":
+				f = "a1"
+				t = "c1"
+			default:
+				return nil, fmt.Errorf("bad castle? %v", m)
+			}
+		case "e8":
+			switch m.S2().String() {
+			case "g8":
+				f = "h8"
+				t = "f8"
+			case "a8":
+				f = "a8"
+				t = "c8"
+			default:
+				return nil, fmt.Errorf("bad castle? %v", m)
+			}
+		default:
+			return nil, fmt.Errorf("bad castle? %v", m)
+		}
+
+		err = s.movePiece(ctx, all, nil, f, t, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if m.HasTag(chess.EnPassant) {
+		return nil, fmt.Errorf("can't handle enpassant")
+	}
+
+	err = s.movePiece(ctx, all, theState, m.S1().String(), m.S2().String(), m)
 	if err != nil {
 		return nil, err
 	}
 
-	err = game.Move(m, nil)
+	err = theState.game.Move(m, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.saveGame(ctx, game)
+	err = s.saveGame(ctx, theState)
 	if err != nil {
 		return nil, err
 	}
