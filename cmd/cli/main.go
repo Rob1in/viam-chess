@@ -30,6 +30,7 @@ func realMain() error {
 
 	from := flag.String("from", "", "")
 	to := flag.String("to", "", "")
+	n := flag.Int("n", 1, "")
 
 	flag.Parse()
 
@@ -83,6 +84,16 @@ func realMain() error {
 		}
 		logger.Infof("res: %v", res)
 		return nil
+	case "go":
+		res, err := thing.DoCommand(ctx, map[string]interface{}{
+			"go": *n,
+		})
+		if err != nil {
+			return err
+		}
+		logger.Infof("res: %v", res)
+		return nil
+
 	default:
 		return fmt.Errorf("unknown command [%s]", *cmd)
 	}

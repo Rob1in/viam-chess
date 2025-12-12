@@ -119,9 +119,6 @@ func BoardDebugImageHack(srcImg image.Image, pc pointcloud.PointCloud, props cam
 
 	squareSize := srcImg.Bounds().Max.Y / 8
 
-	fmt.Printf("eliot %v -> %v squareSize: %d xOffset: %d\n", srcImg.Bounds(), dst.Bounds(), squareSize, xOffset)
-	fmt.Printf("md: %v %v\n", pc.MetaData().MinZ, pc.MetaData().MaxZ)
-
 	squares := []squareInfo{}
 
 	for rank := 1; rank <= 8; rank++ {
@@ -153,8 +150,6 @@ func BoardDebugImageHack(srcImg image.Image, pc pointcloud.PointCloud, props cam
 			pieceColor := estimatePieceColor(subPc)
 			colorNames := []string{"", "W", "B"}
 			meta := colorNames[pieceColor]
-
-			fmt.Printf("%s : color: %v (%s)\n", name, pieceColor, meta)
 
 			draw.Draw(dst, dstRect, srcImg, srcRect.Min, draw.Src)
 

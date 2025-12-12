@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"go.uber.org/multierr"
 
 	"github.com/golang/geo/r3"
 
@@ -25,6 +29,9 @@ import (
 	viz "go.viam.com/rdk/vision"
 	"go.viam.com/rdk/vision/objectdetection"
 	"go.viam.com/rdk/vision/viscapture"
+
+	"github.com/corentings/chess/v2"
+	"github.com/corentings/chess/v2/uci"
 
 	"github.com/erh/vmodutils/touch"
 )
@@ -88,6 +95,12 @@ type viamChessChess struct {
 	rfs    framesystem.Service
 
 	startPose *referenceframe.PoseInFrame
+
+	engine *uci.Engine
+
+	fenFile string
+
+	doCommandLock sync.Mutex
 }
 
 func newViamChessChess(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (resource.Resource, error) {
@@ -148,6 +161,18 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 		return nil, err
 	}
 
+	s.fenFile = os.Getenv("VIAM_MODULE_DATA") + "fen.txt"
+	s.logger.Infof("fenFile: %v", s.fenFile)
+	s.engine, err = uci.New("stockfish")
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.engine.Run(uci.CmdUCI, uci.CmdIsReady, uci.CmdUCINewGame) // TODO: not sure this is correct
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
 }
 
@@ -163,9 +188,13 @@ type MoveCmd struct {
 
 type cmdStruct struct {
 	Move MoveCmd
+	Go   int
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
+	s.doCommandLock.Lock()
+	defer s.doCommandLock.Unlock()
+
 	defer func() {
 		err := s.goToStart(ctx)
 		if err != nil {
@@ -194,13 +223,30 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return nil, fmt.Errorf("finish me")
 	}
 
+	if cmd.Go > 0 {
+		var m *chess.Move
+		for range cmd.Go {
+			m, err = s.makeAMove(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return map[string]interface{}{"move": m.String()}, nil
+	}
+
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
 }
 
 func (s *viamChessChess) Close(context.Context) error {
-	// Put close code here
+	var err error
+
 	s.cancelFunc()
-	return nil
+
+	if s.engine != nil {
+		err = multierr.Combine(err, s.engine.Close())
+	}
+
+	return err
 }
 
 func (s *viamChessChess) findObject(data viscapture.VisCapture, pos string) *viz.Object {
@@ -369,4 +415,82 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 			)),
 	})
 	return err
+}
+
+func (s *viamChessChess) getGame(ctx context.Context) (*chess.Game, error) {
+	data, err := os.ReadFile(s.fenFile)
+	if os.IsNotExist(err) {
+		return chess.NewGame(), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error reading fen (%s) %T", s.fenFile, err)
+	}
+	f, err := chess.FEN(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("invalid fen from (%s) (%s) %w", s.fenFile, data, err)
+	}
+	return chess.NewGame(f), nil
+}
+
+func (s *viamChessChess) saveGame(ctx context.Context, g *chess.Game) error {
+	return os.WriteFile(s.fenFile, []byte(g.FEN()), 0666)
+}
+
+func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess.Move, error) {
+	if s.engine == nil {
+		moves := game.ValidMoves()
+		if len(moves) == 0 {
+			return nil, fmt.Errorf("no valid moves")
+		}
+		return &moves[0], nil
+	}
+
+	cmdPos := uci.CmdPosition{Position: game.Position()}
+	cmdGo := uci.CmdGo{MoveTime: time.Second / 100}
+	err := s.engine.Run(cmdPos, cmdGo)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.engine.SearchResults().BestMove, nil
+
+}
+
+func (s *viamChessChess) makeAMove(ctx context.Context) (*chess.Move, error) {
+	err := s.goToStart(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("can't go home: %v", err)
+	}
+
+	game, err := s.getGame(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m, err := s.pickMove(ctx, game)
+	if err != nil {
+		return nil, err
+	}
+
+	all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.movePiece(ctx, all, m.S1().String(), m.S2().String())
+	if err != nil {
+		return nil, err
+	}
+
+	err = game.Move(m, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.saveGame(ctx, game)
+	if err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }
