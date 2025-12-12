@@ -21,7 +21,7 @@ func (s *resetState) applyMove(from, to chess.Square) error {
 	} else {
 		idx := int(from) - 70
 		m[to] = chess.Piece(s.graveyard[idx])
-		s.graveyard = append(s.graveyard[0:idx], s.graveyard[idx+1:]...)
+		s.graveyard[idx] = -1
 	}
 	s.board = chess.NewBoard(m)
 	return nil
