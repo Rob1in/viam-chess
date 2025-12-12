@@ -72,7 +72,7 @@ func (cfg *ChessConfig) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("need a pose-start")
 	}
 
-	return []string{cfg.PieceFinder, cfg.Arm, cfg.Gripper, cfg.PoseStart}, nil, nil
+	return []string{cfg.PieceFinder, cfg.Arm, cfg.Gripper, cfg.PoseStart, motion.Named("builtin")}, nil, nil
 }
 
 type viamChessChess struct {
