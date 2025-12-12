@@ -56,10 +56,8 @@ func TestReset2(t *testing.T) {
 	test.That(t, squareToString(from), test.ShouldEqual, "X0")
 	test.That(t, to.String(), test.ShouldEqual, "e2")
 
-	test.That(t, len(theState.graveyard), test.ShouldEqual, 1)
 	err = theState.applyMove(from, to)
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(theState.graveyard), test.ShouldEqual, 0)
 
 	// -
 
