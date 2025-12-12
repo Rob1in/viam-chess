@@ -112,7 +112,8 @@ type viamChessChess struct {
 	motion motion.Service
 	rfs    framesystem.Service
 
-	startPose *referenceframe.PoseInFrame
+	startPose   *referenceframe.PoseInFrame
+	skillAdjust float64
 
 	engine *uci.Engine
 
@@ -137,11 +138,12 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
 	s := &viamChessChess{
-		name:       name,
-		logger:     logger,
-		conf:       conf,
-		cancelCtx:  cancelCtx,
-		cancelFunc: cancelFunc,
+		name:        name,
+		logger:      logger,
+		conf:        conf,
+		cancelCtx:   cancelCtx,
+		cancelFunc:  cancelFunc,
+		skillAdjust: 50,
 	}
 
 	s.pieceFinder, err = vision.FromProvider(deps, conf.PieceFinder)
@@ -211,6 +213,7 @@ type cmdStruct struct {
 	Reset  bool
 	Wipe   bool
 	Center bool
+	Skill  float64
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -282,6 +285,11 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 
 	if cmd.Center {
 		return nil, s.centerCamera(ctx)
+	}
+
+	if cmd.Skill > 0 {
+		s.skillAdjust = cmd.Skill
+		return nil, nil
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
@@ -588,8 +596,17 @@ func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess
 		return &moves[0], nil
 	}
 
+	multiplier := 1.0
+	if s.skillAdjust < 50 {
+		multiplier = float64(s.skillAdjust) / 50.0
+		s.logger.Infof("multiplier: %v", multiplier)
+	} else if s.skillAdjust > 50 {
+		multiplier = float64(s.skillAdjust-50) / 2
+		s.logger.Infof("multiplier: %v", multiplier)
+	}
+
 	cmdPos := uci.CmdPosition{Position: game.Position()}
-	cmdGo := uci.CmdGo{MoveTime: time.Millisecond * time.Duration(s.conf.engineMillis())}
+	cmdGo := uci.CmdGo{MoveTime: time.Millisecond * time.Duration(float64(s.conf.engineMillis())*multiplier)}
 	err := s.engine.Run(cmdPos, cmdGo)
 	if err != nil {
 		return nil, err
