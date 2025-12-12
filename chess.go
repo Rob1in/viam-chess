@@ -281,7 +281,7 @@ func (s *viamChessChess) findDetection(data viscapture.VisCapture, pos string) o
 }
 
 func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) (r3.Vector, error) {
-	f := 1 + (pos % 8)
+	f := 8 - (pos % 8)
 	ex := 1 + (pos / 8)
 
 	k := fmt.Sprintf("a%d", f)
@@ -291,13 +291,23 @@ func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) 
 	}
 
 	md := oo.MetaData()
-	return r3.Vector{md.Center().X, md.Center().Y - float64(ex*100), md.Center().Z}, nil
+	return r3.Vector{md.Center().X, md.Center().Y - float64(ex*80), md.Center().Z}, nil
 
 }
 
 func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, theState *state) (r3.Vector, error) {
 	if pos == "-" {
 		return s.graveyardPosition(data, len(theState.graveyard))
+	}
+
+	if pos[0] == 'X' {
+		x := -1
+		_, err := fmt.Sscanf(pos, "X%d", &x)
+		if err != nil {
+			return r3.Vector{}, fmt.Errorf("bad special graveyard (%s)", pos)
+		}
+
+		return s.graveyardPosition(data, x)
 	}
 
 	o := s.findObject(data, pos)
@@ -322,7 +332,7 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, th
 
 func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, theState *state, from, to string, m *chess.Move) error {
 	s.logger.Infof("movePiece called: %s -> %s", from, to)
-	if to != "-" { // check where we're going
+	if to != "-" && to[0] != 'X' { // check where we're going
 		o := s.findObject(data, to)
 		if o == nil {
 			return fmt.Errorf("can't find object for: %s", to)
@@ -462,15 +472,20 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 		orientation.OX = (p.X - 300) / 1000
 	}
 
+	if p.Y < -300 {
+		orientation.OY = (p.Y + 300) / 300
+		orientation.OX += .2
+	}
+
+	myPose := spatialmath.NewPose(p, orientation)
 	_, err := s.motion.Move(ctx, motion.MoveReq{
 		ComponentName: s.conf.Gripper,
-		Destination: referenceframe.NewPoseInFrame("world",
-			spatialmath.NewPose(
-				p,
-				orientation,
-			)),
+		Destination:   referenceframe.NewPoseInFrame("world", myPose),
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("can't move to %v: %w", myPose, err)
+	}
+	return nil
 }
 
 type state struct {
