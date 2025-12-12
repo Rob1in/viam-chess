@@ -57,7 +57,8 @@ type ChessConfig struct {
 
 	PoseStart string `json:"pose-start"`
 
-	Engine string
+	Engine       string
+	EngineMillis int `json:"engine-millis"`
 }
 
 func (cfg *ChessConfig) engine() string {
@@ -65,6 +66,13 @@ func (cfg *ChessConfig) engine() string {
 		return "stockfish"
 	}
 	return cfg.Engine
+}
+
+func (cfg *ChessConfig) engineMillis() int {
+	if cfg.EngineMillis <= 0 {
+		return 10
+	}
+	return cfg.EngineMillis
 }
 
 func (cfg *ChessConfig) Validate(path string) ([]string, []string, error) {
@@ -575,7 +583,7 @@ func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess
 	}
 
 	cmdPos := uci.CmdPosition{Position: game.Position()}
-	cmdGo := uci.CmdGo{MoveTime: time.Second / 100}
+	cmdGo := uci.CmdGo{MoveTime: time.Millisecond * time.Duration(s.conf.engineMillis())}
 	err := s.engine.Run(cmdPos, cmdGo)
 	if err != nil {
 		return nil, err
