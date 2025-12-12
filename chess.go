@@ -206,10 +206,11 @@ type MoveCmd struct {
 }
 
 type cmdStruct struct {
-	Move  MoveCmd
-	Go    int
-	Reset bool
-	Wipe  bool
+	Move   MoveCmd
+	Go     int
+	Reset  bool
+	Wipe   bool
+	Center bool
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -256,7 +257,6 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	}
 
 	if cmd.Go > 0 {
-
 		err := s.checkPositionForMoves(ctx)
 		if err != nil {
 			return nil, err
@@ -278,6 +278,10 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 
 	if cmd.Wipe {
 		return nil, s.wipe(ctx)
+	}
+
+	if cmd.Center {
+		return nil, s.centerCamera(ctx)
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
@@ -324,7 +328,7 @@ func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) 
 	}
 
 	md := oo.MetaData()
-	return r3.Vector{md.Center().X, md.Center().Y - float64(ex*80), md.Center().Z}, nil
+	return r3.Vector{md.Center().X, md.Center().Y - float64(ex*80), 60}, nil
 
 }
 
@@ -424,17 +428,19 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			if got {
 				break
 			}
-			s.logger.Warnf("didn't grab, going to try a little more")
+
 			useZ -= 10
-			if useZ < 0 { // todo: magic number
+			if useZ < 12 { // todo: magic number
 				return fmt.Errorf("couldn't grab, and scared to go lower")
 			}
+
+			s.logger.Warnf("didn't grab, going to try a little more")
 
 			err = s.setupGripper(ctx)
 			if err != nil {
 				return err
 			}
-
+			time.Sleep(250 * time.Millisecond)
 		}
 
 		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, safeZ})
@@ -805,4 +811,57 @@ func (s *viamChessChess) checkPositionForMoves(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("no valid moves from: %v to %v found out of %d", from, to, len(moves))
+}
+
+func (s *viamChessChess) centerCamera(ctx context.Context) error {
+	err := s.goToStart(ctx)
+	if err != nil {
+		return nil
+	}
+
+	//pose := s.startPose.Pose()
+
+	for {
+		time.Sleep(time.Second)
+
+		all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
+		if err != nil {
+			return err
+		}
+
+		sum := r3.Vector{}
+		for _, pos := range []string{"d1", "e1", "d8", "e8"} {
+			v, err := s.getCenterFor(all, pos, nil)
+			if err != nil {
+				return err
+			}
+			sum = sum.Add(v)
+		}
+		sum = sum.Mul(.25)
+		s.logger.Infof("hi: %v", sum)
+
+		return fmt.Errorf("finish me")
+
+		/*
+			if math.Abs(xDelta) < 3 && math.Abs(float64(yDelta)) < 3 {
+				return nil
+			}
+
+			pose = spatialmath.NewPose(
+				pose.Point().Add(r3.Vector{X: xDelta / 3, Y: yDelta / 3}),
+				pose.Orientation(),
+			)
+
+			s.logger.Infof("updated pose: %v", pose)
+
+			_, err = s.motion.Move(ctx, motion.MoveReq{
+				ComponentName: s.conf.Gripper,
+				Destination:   referenceframe.NewPoseInFrame("world", pose),
+			})
+			if err != nil {
+				return fmt.Errorf("can't move to %v: %w", pose, err)
+			}
+		*/
+
+	}
 }
