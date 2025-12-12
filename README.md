@@ -12,7 +12,7 @@
 }
 ```
 
-## piece finder
+## piece finder config
 ```json
 {
     "input" : "<cropped-camera>"
