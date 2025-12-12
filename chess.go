@@ -238,6 +238,12 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	}
 
 	if cmd.Go > 0 {
+
+		err := s.checkPositionForMoves(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		var m *chess.Move
 		for range cmd.Go {
 			m, err = s.makeAMove(ctx)
@@ -710,4 +716,67 @@ func (s *viamChessChess) resetBoard(ctx context.Context) error {
 	}
 
 	return os.Remove(s.fenFile)
+}
+
+func (s *viamChessChess) checkPositionForMoves(ctx context.Context) error {
+	theState, err := s.getGame(ctx)
+	if err != nil {
+		return err
+	}
+
+	all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
+	if err != nil {
+		return err
+	}
+
+	differnces := []chess.Square{}
+	from := chess.NoSquare
+	to := chess.NoSquare
+
+	for sq := chess.A1; sq <= chess.H8; sq++ {
+		x := squareToString(sq)
+
+		fromState := theState.game.Position().Board().Piece(sq)
+		o := s.findObject(all, x)
+		oc := int(o.Geometry.Label()[3] - '0')
+
+		if int(fromState.Color()) != oc {
+			s.logger.Infof("differnent %s fromState: %v o: %v oc: %v", x, fromState, o.Geometry.Label(), oc)
+			differnces = append(differnces, sq)
+			if oc == 0 {
+				from = sq
+			} else if oc > 0 {
+				to = sq
+			}
+		}
+
+	}
+
+	if len(differnces) == 0 {
+		return nil
+	}
+
+	if len(differnces) != 2 {
+		return fmt.Errorf("bad number of differnces (%d) : %v", len(differnces), differnces)
+	}
+
+	moves := theState.game.ValidMoves()
+	for _, m := range moves {
+		if m.S1() == from && m.S2() == to {
+			s.logger.Infof("found it: %v", m.String())
+			err = theState.game.Move(&m, nil)
+			if err != nil {
+				return err
+			}
+
+			err = s.saveGame(ctx, theState)
+			if err != nil {
+				return err
+			}
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no valid moves from: %v to %v found out of %d", from, to, len(moves))
 }
