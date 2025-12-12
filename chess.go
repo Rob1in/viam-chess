@@ -189,8 +189,9 @@ type MoveCmd struct {
 }
 
 type cmdStruct struct {
-	Move MoveCmd
-	Go   int
+	Move  MoveCmd
+	Go    int
+	Reset bool
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -247,6 +248,10 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return map[string]interface{}{"move": m.String()}, nil
 	}
 
+	if cmd.Reset {
+		return nil, s.resetBoard(ctx)
+	}
+
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
 }
 
@@ -297,6 +302,9 @@ func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) 
 
 func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, theState *state) (r3.Vector, error) {
 	if pos == "-" {
+		if s == nil {
+			return r3.Vector{400, -400, 200}, nil
+		}
 		return s.graveyardPosition(data, len(theState.graveyard))
 	}
 
@@ -342,16 +350,17 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 
 			what := "?"
 
-			if theState != nil {
-				pc := theState.game.Position().Board().Piece(m.S2())
-				theState.graveyard = append(theState.graveyard, int(pc))
-			}
-
 			s.logger.Infof("position %s already has a piece (%s) (%s), will move", to, what, o.Geometry.Label())
 			err := s.movePiece(ctx, data, theState, to, "-", nil)
 			if err != nil {
 				return fmt.Errorf("can't move piece out of the way: %w", err)
 			}
+
+			if theState != nil {
+				pc := theState.game.Position().Board().Piece(m.S2())
+				theState.graveyard = append(theState.graveyard, int(pc))
+			}
+
 		}
 	}
 
@@ -499,12 +508,16 @@ type savedState struct {
 }
 
 func (s *viamChessChess) getGame(ctx context.Context) (*state, error) {
-	data, err := os.ReadFile(s.fenFile)
+	return readState(ctx, s.fenFile)
+}
+
+func readState(ctx context.Context, fn string) (*state, error) {
+	data, err := os.ReadFile(fn)
 	if os.IsNotExist(err) {
 		return &state{chess.NewGame(), []int{}}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("error reading fen (%s) %T", s.fenFile, err)
+		return nil, fmt.Errorf("error reading fen (%s) %T", fn, err)
 	}
 
 	ss := savedState{}
@@ -515,7 +528,7 @@ func (s *viamChessChess) getGame(ctx context.Context) (*state, error) {
 
 	f, err := chess.FEN(ss.FEN)
 	if err != nil {
-		return nil, fmt.Errorf("invalid fen from (%s) (%s) %w", s.fenFile, data, err)
+		return nil, fmt.Errorf("invalid fen from (%s) (%s) %w", fn, data, err)
 	}
 	return &state{chess.NewGame(f), ss.Graveyard}, nil
 }
@@ -656,4 +669,45 @@ func (s *viamChessChess) myGrab(ctx context.Context) (bool, error) {
 	}
 
 	return got, nil
+}
+
+func (s *viamChessChess) resetBoard(ctx context.Context) error {
+	theMainState, err := s.getGame(ctx)
+	if err != nil {
+		return err
+	}
+
+	theState := &resetState{theMainState.game.Position().Board(), theMainState.graveyard}
+
+	for {
+		from, to, err := nextResetMove(theState)
+		if err != nil {
+			return err
+		}
+		if from < 0 {
+			break
+		}
+
+		err = s.goToStart(ctx)
+		if err != nil {
+			return err
+		}
+
+		all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
+		if err != nil {
+			return err
+		}
+
+		err = s.movePiece(ctx, all, nil, squareToString(from), squareToString(to), nil)
+		if err != nil {
+			return err
+		}
+
+		err = theState.applyMove(from, to)
+		if err != nil {
+			return err
+		}
+	}
+
+	return os.Remove(s.fenFile)
 }
