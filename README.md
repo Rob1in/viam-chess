@@ -2,6 +2,7 @@
 
 ## To get your own
 * Get all the hardware
+** https://docs.google.com/document/d/1T_ZlkjAxhhUZB5_EhZ64C6UP2SrXKVqBU8UHFkGirrw/edit?usp=sharing
 * Make a table that looks like: ___
 * Create a Viam machine
 * Use the sample config in examples/config1.txt
