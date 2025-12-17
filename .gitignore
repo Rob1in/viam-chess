@@ -28,5 +28,7 @@ state.json
 bin
 *tar.gz
 
+chesscli
+
 test*.jpg
 hack-test.jpg   
