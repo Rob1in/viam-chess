@@ -16,6 +16,11 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otrace "go.opentelemetry.io/otel/sdk/trace"
+	ootrace "go.opentelemetry.io/otel/trace"
+
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/components/switch"
@@ -30,7 +35,6 @@ import (
 	viz "go.viam.com/rdk/vision"
 	"go.viam.com/rdk/vision/objectdetection"
 	"go.viam.com/rdk/vision/viscapture"
-	"go.viam.com/utils/perf"
 	"go.viam.com/utils/trace"
 
 	"github.com/corentings/chess/v2"
@@ -102,6 +106,8 @@ type viamChessChess struct {
 	logger logging.Logger
 	conf   *ChessConfig
 
+	tracer *otrace.TracerProvider
+
 	cancelCtx  context.Context
 	cancelFunc func()
 
@@ -135,7 +141,6 @@ func newViamChessChess(ctx context.Context, deps resource.Dependencies, rawConf 
 }
 
 func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *ChessConfig, logger logging.Logger) (resource.Resource, error) {
-	var err error
 
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
@@ -146,6 +151,14 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 		cancelCtx:   cancelCtx,
 		cancelFunc:  cancelFunc,
 		skillAdjust: 50,
+	}
+
+	exporter, err := otlptracegrpc.New(context.Background())
+	if err != nil {
+		logger.Warnf("can't enable tracing: %v", err)
+	} else {
+		s.tracer = otrace.NewTracerProvider(otrace.WithBatcher(exporter))
+		otel.SetTracerProvider(s.tracer)
 	}
 
 	s.pieceFinder, err = vision.FromProvider(deps, conf.PieceFinder)
@@ -219,13 +232,11 @@ type cmdStruct struct {
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
-	exporter := perf.NewOtelDevelopmentExporter()
-	err := exporter.Start()
-	if err != nil {
-		return nil, fmt.Errorf("can't start tracer: %w", err)
+	if s.tracer != nil {
+		var span ootrace.Span
+		ctx, span = s.tracer.Tracer("chess").Start(ctx, "DoCommand")
+		defer span.End()
 	}
-
-	defer exporter.Stop()
 
 	s.doCommandLock.Lock()
 	defer s.doCommandLock.Unlock()
@@ -237,7 +248,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		}
 	}()
 	var cmd cmdStruct
-	err = mapstructure.Decode(cmdMap, &cmd)
+	err := mapstructure.Decode(cmdMap, &cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -305,13 +316,18 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
 }
 
-func (s *viamChessChess) Close(context.Context) error {
+func (s *viamChessChess) Close(ctx context.Context) error {
 	var err error
 
 	s.cancelFunc()
 
 	if s.engine != nil {
 		err = multierr.Combine(err, s.engine.Close())
+	}
+
+	if s.tracer != nil {
+		s.tracer.Shutdown(ctx)
+		s.tracer = nil
 	}
 
 	return err
@@ -389,7 +405,7 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, th
 }
 
 func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, theState *state, from, to string, m *chess.Move) error {
-	ctx, span := trace.StartSpan(ctx, "chess::movePiece")
+	ctx, span := trace.StartSpan(ctx, "movePiece")
 	defer span.End()
 
 	s.logger.Infof("movePiece called: %s -> %s", from, to)
@@ -501,7 +517,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 }
 
 func (s *viamChessChess) goToStart(ctx context.Context) error {
-	ctx, span := trace.StartSpan(ctx, "chess::makeAMove")
+	ctx, span := trace.StartSpan(ctx, "goToStart")
 	defer span.End()
 
 	err := s.poseStart.SetPosition(ctx, 2, nil)
@@ -570,7 +586,7 @@ func (s *viamChessChess) getGame(ctx context.Context) (*state, error) {
 }
 
 func readState(ctx context.Context, fn string) (*state, error) {
-	ctx, span := trace.StartSpan(ctx, "chess::readState")
+	ctx, span := trace.StartSpan(ctx, "readState")
 	defer span.End()
 
 	data, err := os.ReadFile(fn)
@@ -595,7 +611,7 @@ func readState(ctx context.Context, fn string) (*state, error) {
 }
 
 func (s *viamChessChess) saveGame(ctx context.Context, theState *state) error {
-	ctx, span := trace.StartSpan(ctx, "chess::saveGame")
+	ctx, span := trace.StartSpan(ctx, "saveGame")
 	defer span.End()
 
 	ss := savedState{
@@ -610,7 +626,7 @@ func (s *viamChessChess) saveGame(ctx context.Context, theState *state) error {
 }
 
 func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess.Move, error) {
-	ctx, span := trace.StartSpan(ctx, "chess::pickMove")
+	ctx, span := trace.StartSpan(ctx, "pickMove")
 	defer span.End()
 
 	if s.engine == nil {
@@ -642,7 +658,7 @@ func (s *viamChessChess) pickMove(ctx context.Context, game *chess.Game) (*chess
 }
 
 func (s *viamChessChess) makeAMove(ctx context.Context) (*chess.Move, error) {
-	ctx, span := trace.StartSpan(ctx, "chess::makeAMove")
+	ctx, span := trace.StartSpan(ctx, "makeAMove")
 	defer span.End()
 
 	err := s.goToStart(ctx)
