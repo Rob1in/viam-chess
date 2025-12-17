@@ -134,6 +134,9 @@ func newViamChessChess(ctx context.Context, deps resource.Dependencies, rawConf 
 }
 
 func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *ChessConfig, logger logging.Logger) (resource.Resource, error) {
+
+	enableTracing(logger)
+
 	var err error
 
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
