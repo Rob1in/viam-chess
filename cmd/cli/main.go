@@ -34,13 +34,6 @@ func realMain() error {
 
 	flag.Parse()
 
-	exporter, err := otlptracegrpc.New(context.Background())
-	if err != nil {
-		logger.Warnf("can't enable tracing: %v", err)
-	} else {
-		trace.AddExporters(exporter)
-	}
-
 	if *debug {
 		logger.SetLevel(logging.DEBUG)
 	}

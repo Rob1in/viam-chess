@@ -9,9 +9,9 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.38.0
 	go.uber.org/multierr v1.11.0
-	go.viam.com/rdk v0.106.0
+	go.viam.com/rdk v0.106.1-0.20251216191440-6746e3ad3fa3
 	go.viam.com/test v1.2.4
-	go.viam.com/utils v0.4.0
+	go.viam.com/utils v0.4.2
 	golang.org/x/image v0.25.0
 )
 
