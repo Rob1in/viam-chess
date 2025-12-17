@@ -18,7 +18,7 @@ import (
 
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
-	"go.viam.com/rdk/components/switch"
+	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
@@ -43,6 +43,7 @@ var ChessModel = family.WithModel("chess")
 const safeZ = 200.0
 
 func init() {
+	enableTracing()
 	resource.RegisterService(generic.API, ChessModel,
 		resource.Registration[resource.Resource, *ChessConfig]{
 			Constructor: newViamChessChess,
@@ -134,8 +135,6 @@ func newViamChessChess(ctx context.Context, deps resource.Dependencies, rawConf 
 }
 
 func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *ChessConfig, logger logging.Logger) (resource.Resource, error) {
-
-	enableTracing(logger)
 
 	var err error
 
