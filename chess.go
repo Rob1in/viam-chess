@@ -812,6 +812,9 @@ func (s *viamChessChess) wipe(ctx context.Context) error {
 }
 
 func (s *viamChessChess) checkPositionForMoves(ctx context.Context) error {
+	ctx, span := trace.StartSpan(ctx, "checkPositionForMoves")
+	defer span.End()
+
 	theState, err := s.getGame(ctx)
 	if err != nil {
 		return err
