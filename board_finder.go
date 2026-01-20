@@ -278,6 +278,26 @@ func findCheckerboardStart(corners []image.Point, img image.Image, gray [][]int,
 		finalX := adjustCoordinate(gray, x, y, -stepX, 0, width, height, 20)
 		finalY := adjustCoordinate(gray, x, y, 0, -stepY, width, height, 20)
 
+		// For bottom corners, check if there's a white border below the detected Y
+		// If so, use the white border edge instead
+		if stepY < 0 {
+			// Bottom corner - scan from detected Y toward bottom to find white border
+			centerX := width / 2
+			for checkY := finalY; checkY < height-5; checkY++ {
+				if gray[checkY][centerX] > 180 {
+					// Found white border - find where it starts
+					for edgeY := checkY; edgeY >= finalY; edgeY-- {
+						if gray[edgeY][centerX] < 150 {
+							// Found the edge - use edgeY+1 as the corner Y
+							finalY = edgeY + 1
+							break
+						}
+					}
+					break
+				}
+			}
+		}
+
 		refined[i] = image.Point{finalX, finalY}
 	}
 
@@ -315,6 +335,8 @@ func findWhiteBorderCornerFromEdge(gray [][]int, dirX, dirY, width, height int) 
 	// (transition from white to checkerboard)
 	finalX := startX
 	foundWhite := false
+	foundTransition := false
+	firstWhiteX := startX
 
 	for step := 0; step < width; step++ {
 		nx := startX + scanDirX*step
@@ -326,11 +348,68 @@ func findWhiteBorderCornerFromEdge(gray [][]int, dirX, dirY, width, height int) 
 		if !foundWhite && brightness > 150 {
 			// Found the white border
 			foundWhite = true
+			firstWhiteX = nx
 		} else if foundWhite && brightness < 130 {
 			// Found transition from white border to checkerboard
 			// Back up to the last white position
 			finalX = nx - scanDirX
+			foundTransition = true
 			break
+		}
+	}
+
+	// If no transition found OR transition is suspiciously far (found opposite edge),
+	// the white border extends further than expected at searchY.
+	// Try a different Y level in the checkerboard area.
+	transitionTooFar := foundTransition && abs(finalX-startX) > width/2
+	if (!foundTransition || transitionTooFar) && foundWhite {
+		// Try scanning at Y=height/4 which should be safely in the checkerboard
+		altSearchY := height / 4
+		altFoundWhite := false
+		for step := 0; step < width; step++ {
+			nx := startX + scanDirX*step
+			if nx < 0 || nx >= width {
+				break
+			}
+			brightness := gray[altSearchY][nx]
+
+			if !altFoundWhite && brightness > 150 {
+				// Found the board at this Y level
+				altFoundWhite = true
+			} else if altFoundWhite && brightness < 130 {
+				// Found white->dark transition at altSearchY (this is checkerboard edge)
+				// Now we need to find the coordinate label column boundary
+				// The coordinate labels are in the narrow strip between firstWhiteX and this point
+				// Scan at the original searchY from firstWhiteX toward center to find label text boundary
+				foundLabel := false
+				for x := firstWhiteX; ; x += scanDirX {
+					if x < 0 || x >= width {
+						break
+					}
+					// Stop if we've gone past the checkerboard edge we found
+					if scanDirX > 0 && x > nx {
+						break
+					}
+					if scanDirX < 0 && x < nx {
+						break
+					}
+					// Look for where the coordinate label starts (dark text on white)
+					if gray[searchY][x] < 140 {
+						// Found darker region - this is the label text
+						// The coordinate label column edge is just before this
+						finalX = x - scanDirX
+						foundTransition = true
+						foundLabel = true
+						break
+					}
+				}
+				// If no label text found at searchY, use the checkerboard edge we found
+				if !foundLabel {
+					finalX = nx - scanDirX
+					foundTransition = true
+				}
+				break
+			}
 		}
 	}
 
@@ -363,10 +442,13 @@ func findWhiteBorderCornerFromEdge(gray [][]int, dirX, dirY, width, height int) 
 		}
 	} else {
 		// Bottom corner - find where the white border ends at the bottom
+		// Use center of board for Y search to avoid coordinate label column
+		// which is all white and won't show the transition
+		centerSearchX := width / 2
 		foundWhiteBorder := false
 		finalY = height - 1 // default to bottom
 		for y := height - 1; y > height*3/4; y-- {
-			brightness := gray[y][searchX]
+			brightness := gray[y][centerSearchX]
 			if brightness > 150 {
 				foundWhiteBorder = true
 			} else if foundWhiteBorder && brightness < 130 {
