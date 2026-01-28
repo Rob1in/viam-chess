@@ -39,13 +39,13 @@ func TestFindBoardCorners(t *testing.T) {
 
 	// Check all 4 expected corners (from edge-refined line intersection)
 	expectedCorners := []image.Point{
-		{388, 54},  // top-left
+		{392, 54},  // top-left
 		{965, 79},  // top-right
 		{938, 664}, // bottom-right
 		{359, 636}, // bottom-left
 	}
 
-	tolerance := 8.0
+	tolerance := 5.0
 	for _, expected := range expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
@@ -122,7 +122,7 @@ func TestFindBoardCorners3(t *testing.T) {
 		{275, 697}, // bottom-left
 	}
 
-	tolerance := 8.0
+	tolerance := 2.0
 	for _, expected := range expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
@@ -168,13 +168,13 @@ func TestFindBoardCorners2(t *testing.T) {
 
 	// Check all 4 expected corners (from line intersection detection)
 	expectedCorners := []image.Point{
-		{302, 76},  // top-left
+		{303, 76},  // top-left
 		{883, 56},  // top-right
 		{905, 638}, // bottom-right
 		{311, 654}, // bottom-left
 	}
 
-	tolerance := 8.0
+	tolerance := 2.0
 	for _, expected := range expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
@@ -227,7 +227,7 @@ func TestFindBoardCorners4(t *testing.T) {
 		{271, 697}, // bottom-left
 	}
 
-	tolerance := 8.0
+	tolerance := 2.0
 	for _, expected := range expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
@@ -274,13 +274,13 @@ func TestFindBoardCorners5(t *testing.T) {
 
 	// Expected corners for board5 (white border with coordinates, rotated 180 deg)
 	expectedCorners := []image.Point{
-		{297, 18},  // top-left
-		{973, 18},  // top-right
-		{986, 701}, // bottom-right
-		{286, 707}, // bottom-left
+		{295, 17},  // top-left
+		{967, 16},  // top-right
+		{983, 701}, // bottom-right
+		{283, 705}, // bottom-left
 	}
 
-	tolerance := 8.0
+	tolerance := 7.0
 	for _, expected := range expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
@@ -326,23 +326,15 @@ func TestFindBoardCorners6(t *testing.T) {
 	t.Log("Saved output image to data/board6_output.jpg")
 
 	// Expected corners for board6 (white border with coordinates, angled perspective)
-	// User's requested targets:
-	// - Top-right: (982, 15)
-	// - Bottom-right: (996, 698)
-	//
-	// Current detection:
-	// - Top-left: (305,10) - Close to ideal
-	// - Top-right: (981,0) - X is 1px off (perfect!), Y is 15px off
-	// - Bottom-right: (981,698) - X is 15px off, Y is perfect
-	// - Bottom-left: (293,699) - Perfect
+	// Achieved high precision with white border refinement
 	expectedCorners := []image.Point{
-		{305, 10},  // top-left - accept current
-		{982, 15},  // top-right - user's target
-		{996, 698}, // bottom-right - user's target
-		{293, 699}, // bottom-left - accept current
+		{305, 10},  // top-left - perfect
+		{981, 16},  // top-right - very close to ideal
+		{996, 698}, // bottom-right - perfect
+		{293, 699}, // bottom-left - perfect
 	}
 
-	tolerance := 16.0 // Tolerance for current detection limitations
+	tolerance := 2.0 // Tight tolerance to prevent regression
 	for _, expected := range expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
