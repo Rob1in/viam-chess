@@ -1252,6 +1252,48 @@ func refineWhiteBorderCorners(gray [][]int, corners []image.Point, width, height
 		return corners // Not a white-bordered board
 	}
 
+	// For top corners, find where the white border ends and checkerboard begins
+	// Sample near each corner independently to account for perspective
+	topLeftX := corners[0].X
+	topRightX := corners[1].X
+
+	// Refine top corners only if they're currently at the very edge (Y < 3)
+	// This indicates they may have been placed at the white border outer edge instead of inner edge
+
+	// Refine top-left corner
+	if corners[0].Y < 3 {
+		topLeftY := 0
+		for i := 0; i < 3; i++ {
+			sampleX := topLeftX + i*10
+			if sampleX >= 0 && sampleX < width {
+				y := findWhiteBorderEdgeFromTop(gray, sampleX, height)
+				if y > topLeftY {
+					topLeftY = y
+				}
+			}
+		}
+		if topLeftY > corners[0].Y && topLeftY < height && topLeftY-corners[0].Y <= 20 {
+			corners[0] = image.Point{corners[0].X, topLeftY}
+		}
+	}
+
+	// Refine top-right corner
+	if corners[1].Y < 3 {
+		topRightY := 0
+		for i := 0; i < 3; i++ {
+			sampleX := topRightX - i*10
+			if sampleX >= 0 && sampleX < width {
+				y := findWhiteBorderEdgeFromTop(gray, sampleX, height)
+				if y > topRightY {
+					topRightY = y
+				}
+			}
+		}
+		if topRightY > corners[1].Y && topRightY < height && topRightY-corners[1].Y <= 20 {
+			corners[1] = image.Point{corners[1].X, topRightY}
+		}
+	}
+
 	// For bottom corners, find where the white border actually ends
 	// Sample at multiple X positions and use the maximum Y found
 	// This accounts for perspective distortion where the board edge isn't horizontal
@@ -1278,7 +1320,60 @@ func refineWhiteBorderCorners(gray [][]int, corners []image.Point, width, height
 		corners[3] = image.Point{corners[3].X, maxBottomY}
 	}
 
+	// For right corners, find where the white border actually ends on the right side
+	// Sample at multiple Y positions and use the maximum X found
+	rightTopY := corners[1].Y
+	rightBottomY := corners[2].Y
+
+	maxRightX := 0
+	// Sample at several positions along the right edge
+	for i := 0; i < 5; i++ {
+		// Sample from 20 pixels inside the top/bottom edges to avoid corners
+		rightMargin := 20
+		if rightBottomY-rightTopY > 40 {
+			sampleY := rightTopY + rightMargin + i*(rightBottomY-rightTopY-2*rightMargin)/4
+			if sampleY >= 0 && sampleY < height {
+				x := findWhiteBorderEdgeFromRight(gray, sampleY, width)
+				if x > maxRightX {
+					maxRightX = x
+				}
+			}
+		}
+	}
+
+	// Only update bottom-right corner (not top-right) if we found a valid edge
+	// that's further right than current but not too far (within 20 pixels)
+	// Top-right often needs to be at the inner edge (checkerboard start) due to coordinate labels
+	if maxRightX > corners[2].X && maxRightX < width-5 && maxRightX-corners[2].X <= 20 {
+		corners[2] = image.Point{maxRightX, corners[2].Y}
+	}
+
 	return corners
+}
+
+// findWhiteBorderEdgeFromTop scans from the top of the image downward
+// to find where the white border ends and the checkerboard begins
+func findWhiteBorderEdgeFromTop(gray [][]int, x, height int) int {
+	// Look for where brightness variance increases (checkerboard pattern)
+	// or where we see a consistent darker region (coordinate labels / checkerboard)
+	// Search in the first 30 pixels from top
+
+	// Calculate average brightness in a sliding window
+	windowSize := 3
+	for y := windowSize; y < 30 && y < height-windowSize; y++ {
+		// Calculate variance in a vertical window
+		sum := 0
+		for dy := -windowSize; dy <= windowSize; dy++ {
+			sum += gray[y+dy][x]
+		}
+		avgBrightness := sum / (2*windowSize + 1)
+
+		// If average drops below 100 (darker region), this is likely where board starts
+		if avgBrightness < 100 {
+			return y
+		}
+	}
+	return 0
 }
 
 // findWhiteBorderEdgeFromBottom scans from the bottom of the image upward
