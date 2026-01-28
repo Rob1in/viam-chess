@@ -324,8 +324,8 @@ func findWhiteBorderCornerFromEdge(gray [][]int, dirX, dirY, width, height int) 
 	var searchY int
 	if dirY < 0 {
 		// Top corner - use Y level where coordinate label text is visible
-		// The coordinate labels (like "8") are typically around Y=8-12
-		searchY = 10
+		// Use Y=15 for better consistency across different board perspectives
+		searchY = 15
 	} else {
 		// Bottom corner - use position near bottom where white border is visible
 		searchY = height - 10
