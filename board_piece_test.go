@@ -35,8 +35,15 @@ func TestBoardPiece4(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 	t.Logf("Original PC size: %d, Filtered PC size: %d", pc.Size(), filteredPC.Size())
 
+	// Create properties for the transformed image (principal point at center of output)
+	transformedProps := props
+	transformedProps.IntrinsicParams.Ppx = float64(outputSize) / 2
+	transformedProps.IntrinsicParams.Ppy = float64(outputSize) / 2
+	transformedProps.IntrinsicParams.Width = outputSize
+	transformedProps.IntrinsicParams.Height = outputSize
+
 	// Call BoardDebugImageHack with the transformed image and filtered pointcloud
-	out, squares, err := BoardDebugImageHack(transformedImg, filteredPC, props)
+	out, squares, err := BoardDebugImageHack(transformedImg, filteredPC, transformedProps)
 	test.That(t, err, test.ShouldBeNil)
 
 	// Save the output image for inspection
