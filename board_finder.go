@@ -469,6 +469,12 @@ func adjustCoordinate(gray [][]int, startX, startY, dx, dy, width, height, maxSt
 		bestPos = startY
 	}
 	bestGrad := 0
+	bestStep := 0
+
+	// Track the furthest position with a reasonable gradient (for outer edge preference)
+	furthestPos := bestPos
+	furthestStep := 0
+	furthestGrad := 0
 
 	// Scan in the given direction looking for a strong gradient
 	for step := 0; step <= maxSteps; step++ {
@@ -482,14 +488,33 @@ func adjustCoordinate(gray [][]int, startX, startY, dx, dy, width, height, maxSt
 		// Compute gradient at this position
 		grad := abs(gray[ny][nx+1]-gray[ny][nx-1]) + abs(gray[ny+1][nx]-gray[ny-1][nx])
 
+		// Track best gradient
 		if grad > bestGrad {
 			bestGrad = grad
+			bestStep = step
 			if dx != 0 {
 				bestPos = nx
 			} else {
 				bestPos = ny
 			}
 		}
+
+		// Track furthest position with reasonable gradient (>30)
+		if grad > 30 && step > furthestStep {
+			furthestStep = step
+			furthestGrad = grad
+			if dx != 0 {
+				furthestPos = nx
+			} else {
+				furthestPos = ny
+			}
+		}
+	}
+
+	// Prefer the furthest position if it has a decent gradient (>40% of best)
+	// and is further out (>3 steps)
+	if furthestGrad*100 >= bestGrad*40 && furthestStep > bestStep+3 {
+		return furthestPos
 	}
 
 	return bestPos
@@ -1076,7 +1101,7 @@ func refineCornersWithLines(gray [][]int, corners []image.Point, width, height i
 	// Refine each corner by finding the exact edge positions
 	refined = refineCornersByEdgeTracing(gray, refined, width, height)
 
-	// For boards with white border, refine bottom corners by finding the actual border edge
+	// For boards with white border, refine bottom and right corners by finding the actual border edge
 	refined = refineWhiteBorderCorners(gray, refined, width, height)
 
 	return refined
@@ -1142,6 +1167,7 @@ func findNearestEdgeX(gray [][]int, startX, y, searchDir, width, maxDist int) in
 		// Gradient in X direction (detecting vertical edges)
 		grad := abs(gray[y][x+1] - gray[y][x-1])
 
+		// Find the strongest gradient
 		if grad > bestGrad {
 			bestGrad = grad
 			bestX = x
@@ -1173,6 +1199,7 @@ func findNearestEdgeY(gray [][]int, x, startY, searchDir, height, maxDist int) i
 		// Gradient in Y direction (detecting horizontal edges)
 		grad := abs(gray[y+1][x] - gray[y-1][x])
 
+		// Find the strongest gradient
 		if grad > bestGrad {
 			bestGrad = grad
 			bestY = y
@@ -1269,6 +1296,23 @@ func findWhiteBorderEdgeFromBottom(gray [][]int, x, height int) int {
 		}
 	}
 	return height - 1
+}
+
+// findWhiteBorderEdgeFromRight scans from the right edge of the image leftward
+// to find where the white border transitions to dark (the inner edge of the border)
+func findWhiteBorderEdgeFromRight(gray [][]int, y, width int) int {
+	// Start from right, look for bright -> dark transition
+	foundBright := false
+	for x := width - 1; x > width/2; x-- {
+		brightness := gray[y][x]
+		if brightness > 150 {
+			foundBright = true
+		} else if foundBright && brightness < 100 {
+			// Found the inner edge of the white border
+			return x
+		}
+	}
+	return width - 1
 }
 
 func isValidCorner(pt image.Point, width, height int) bool {
