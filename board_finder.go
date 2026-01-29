@@ -1113,7 +1113,8 @@ func refineCornersByEdgeTracing(gray [][]int, corners []image.Point, width, heig
 	refined := make([]image.Point, 4)
 	copy(refined, corners)
 
-	// For each corner, refine X and Y independently by finding the nearest strong edge
+	// For each corner, refine X and Y independently by sampling multiple positions
+	// inside the board and finding consistent edges
 	// Corner order: 0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left
 	// Direction toward board center for each corner
 	cornerDirs := [][2]int{
@@ -1126,37 +1127,71 @@ func refineCornersByEdgeTracing(gray [][]int, corners []image.Point, width, heig
 	for i, corner := range corners {
 		dirX, dirY := cornerDirs[i][0], cornerDirs[i][1]
 
-		// Refine X: scan a small window around corner.X at a Y position inside the board
-		// Look for the transition between board and non-board
-		sampleY := corner.Y + dirY*15 // Sample 15 pixels inside the board
-		if sampleY >= 2 && sampleY < height-2 {
-			refinedX := findNearestEdgeX(gray, corner.X, sampleY, -dirX, width, 15)
-			if refinedX >= 0 {
-				refined[i].X = refinedX
+		// Refine X: Sample at multiple Y positions inside the board
+		// Take the median edge position to avoid outliers
+		xSamples := []int{}
+		// Sample closer to the corner (10-25 pixels) for better accuracy
+		for sampleOffset := 10; sampleOffset <= 25; sampleOffset += 5 {
+			sampleY := corner.Y + dirY*sampleOffset
+			if sampleY >= 2 && sampleY < height-2 {
+				refinedX := findBoardEdgeX(gray, corner.X, sampleY, -dirX, width, 12)
+				if refinedX >= 0 {
+					xSamples = append(xSamples, refinedX)
+				}
 			}
 		}
+		if len(xSamples) > 0 {
+			refined[i].X = medianInt(xSamples)
+		}
 
-		// Refine Y: scan a small window around corner.Y at an X position inside the board
-		sampleX := corner.X + dirX*15 // Sample 15 pixels inside the board
-		if sampleX >= 2 && sampleX < width-2 {
-			refinedY := findNearestEdgeY(gray, sampleX, corner.Y, -dirY, height, 15)
-			if refinedY >= 0 {
-				refined[i].Y = refinedY
+		// Refine Y: Sample at multiple X positions inside the board
+		// For top corners (dirY > 0), sample deeper to avoid interior features like chess pieces
+		// For bottom corners (dirY < 0), sample closer to the edge
+		ySamples := []int{}
+		if dirY > 0 {
+			// Top corners: sample deeper inside (30-50 pixels) with 10-pixel steps
+			for sampleOffset := 30; sampleOffset <= 50; sampleOffset += 10 {
+				sampleX := corner.X + dirX*sampleOffset
+				if sampleX >= 2 && sampleX < width-2 {
+					refinedY := findBoardEdgeY(gray, sampleX, corner.Y, -dirY, height, 12)
+					if refinedY >= 0 {
+						ySamples = append(ySamples, refinedY)
+					}
+				}
 			}
+		} else {
+			// Bottom corners: sample closer (10-25 pixels) with 5-pixel steps
+			for sampleOffset := 10; sampleOffset <= 25; sampleOffset += 5 {
+				sampleX := corner.X + dirX*sampleOffset
+				if sampleX >= 2 && sampleX < width-2 {
+					refinedY := findBoardEdgeY(gray, sampleX, corner.Y, -dirY, height, 12)
+					if refinedY >= 0 {
+						ySamples = append(ySamples, refinedY)
+					}
+				}
+			}
+		}
+		if len(ySamples) > 0 {
+			refined[i].Y = medianInt(ySamples)
 		}
 	}
 
 	return refined
 }
 
-// findNearestEdgeX finds the X position of the nearest strong vertical edge
-func findNearestEdgeX(gray [][]int, startX, y, searchDir, width, maxDist int) int {
+// findBoardEdgeX finds the board edge in X direction by looking for edges
+// and preferring edges that are further from the board center (outer edges)
+func findBoardEdgeX(gray [][]int, startX, y, searchDir, width, maxDist int) int {
 	if y < 2 || y >= len(gray)-2 {
 		return -1
 	}
 
-	bestX := startX
-	bestGrad := 0
+	// Find all strong edges in the search window
+	type edgeCandidate struct {
+		x    int
+		grad int
+	}
+	var edges []edgeCandidate
 
 	for dx := -maxDist; dx <= maxDist; dx++ {
 		x := startX + dx
@@ -1167,27 +1202,51 @@ func findNearestEdgeX(gray [][]int, startX, y, searchDir, width, maxDist int) in
 		// Gradient in X direction (detecting vertical edges)
 		grad := abs(gray[y][x+1] - gray[y][x-1])
 
-		if grad > bestGrad {
-			bestGrad = grad
-			bestX = x
+		if grad > 40 {
+			edges = append(edges, edgeCandidate{x, grad})
 		}
 	}
 
-	// Only return if we found a significant edge
-	if bestGrad > 40 {
-		return bestX
+	if len(edges) == 0 {
+		return startX
 	}
-	return startX
+
+	// If there's only one strong edge, use it
+	if len(edges) == 1 {
+		return edges[0].x
+	}
+
+	// If there are multiple edges, prefer the one furthest in the search direction
+	// (which should be the outer board edge, not an interior feature)
+	bestEdge := edges[0]
+	for _, edge := range edges[1:] {
+		// Prefer edges with stronger gradients, but also prefer edges further out
+		if edge.grad > bestEdge.grad*4/5 {
+			// If gradient is at least 80% as strong, prefer based on position
+			if searchDir*(edge.x-startX) > searchDir*(bestEdge.x-startX) {
+				bestEdge = edge
+			}
+		} else if edge.grad > bestEdge.grad {
+			bestEdge = edge
+		}
+	}
+
+	return bestEdge.x
 }
 
-// findNearestEdgeY finds the Y position of the nearest strong horizontal edge
-func findNearestEdgeY(gray [][]int, x, startY, searchDir, height, maxDist int) int {
+// findBoardEdgeY finds the board edge in Y direction by looking for edges
+// and preferring edges that are further from the board center (outer edges)
+func findBoardEdgeY(gray [][]int, x, startY, searchDir, height, maxDist int) int {
 	if x < 2 || x >= len(gray[0])-2 {
 		return -1
 	}
 
-	bestY := startY
-	bestGrad := 0
+	// Find all strong edges in the search window
+	type edgeCandidate struct {
+		y    int
+		grad int
+	}
+	var edges []edgeCandidate
 
 	for dy := -maxDist; dy <= maxDist; dy++ {
 		y := startY + dy
@@ -1198,17 +1257,57 @@ func findNearestEdgeY(gray [][]int, x, startY, searchDir, height, maxDist int) i
 		// Gradient in Y direction (detecting horizontal edges)
 		grad := abs(gray[y+1][x] - gray[y-1][x])
 
-		if grad > bestGrad {
-			bestGrad = grad
-			bestY = y
+		if grad > 40 {
+			edges = append(edges, edgeCandidate{y, grad})
 		}
 	}
 
-	// Only return if we found a significant edge
-	if bestGrad > 40 {
-		return bestY
+	if len(edges) == 0 {
+		return startY
 	}
-	return startY
+
+	// If there's only one strong edge, use it
+	if len(edges) == 1 {
+		return edges[0].y
+	}
+
+	// If there are multiple edges, prefer the one furthest in the search direction
+	// (which should be the outer board edge, not an interior feature)
+	bestEdge := edges[0]
+	for _, edge := range edges[1:] {
+		// Prefer edges with stronger gradients, but also prefer edges further out
+		if edge.grad > bestEdge.grad*4/5 {
+			// If gradient is at least 80% as strong, prefer based on position
+			if searchDir*(edge.y-startY) > searchDir*(bestEdge.y-startY) {
+				bestEdge = edge
+			}
+		} else if edge.grad > bestEdge.grad {
+			bestEdge = edge
+		}
+	}
+
+	return bestEdge.y
+}
+
+// medianInt returns the median of a slice of integers
+func medianInt(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	if len(values) == 1 {
+		return values[0]
+	}
+
+	// Make a copy and sort it
+	sorted := make([]int, len(values))
+	copy(sorted, values)
+	sort.Ints(sorted)
+
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[mid-1] + sorted[mid]) / 2
+	}
+	return sorted[mid]
 }
 
 // refineWhiteBorderCorners adjusts corners for boards with white border frames
@@ -1292,38 +1391,66 @@ func refineWhiteBorderCorners(gray [][]int, corners []image.Point, width, height
 		}
 	}
 
+	// For white-bordered boards where top corners have Y < 15, also refine the X coordinates
+	// to find the inner edge (where checkerboard starts) rather than outer edge
+	if corners[0].Y < 15 && corners[1].Y < 15 {
+		// Refine top-left X by scanning from the left to find coordinate label edge
+		for sampleY := corners[0].Y + 5; sampleY < corners[0].Y+25 && sampleY < height; sampleY += 5 {
+			foundDark := false
+			for x := corners[0].X; x < corners[0].X+20 && x < width-2; x++ {
+				if gray[sampleY][x] < 130 {
+					// Found darker region (coordinate label or checkerboard)
+					// This is the inner edge
+					if x > corners[0].X && x-corners[0].X <= 15 {
+						corners[0] = image.Point{x, corners[0].Y}
+					}
+					foundDark = true
+					break
+				}
+			}
+			if foundDark {
+				break
+			}
+		}
+	}
+
 	// For bottom corners, find where the white border actually ends
-	// Sample at multiple X positions and use the maximum Y found
-	// This accounts for perspective distortion where the board edge isn't horizontal
+	// Sample at multiple X positions to find the inner edge consistently
 	bottomLeftX := corners[3].X
 	bottomRightX := corners[2].X
 
-	maxBottomY := 0
+	// Collect samples to find a reliable bottom edge
+	bottomYSamples := []int{}
 	// Sample at several positions across the board
 	for i := 0; i < 5; i++ {
 		sampleX := bottomLeftX + 20 + i*(bottomRightX-bottomLeftX-40)/4
 		if sampleX >= 0 && sampleX < width {
 			y := findWhiteBorderEdgeFromBottom(gray, sampleX, height)
-			if y > maxBottomY {
-				maxBottomY = y
+			if y > 0 && y < height-5 {
+				bottomYSamples = append(bottomYSamples, y)
 			}
 		}
 	}
 
-	// Update both bottom corners to use the maximum Y value found
-	if maxBottomY > corners[2].Y && maxBottomY < height-5 {
-		corners[2] = image.Point{corners[2].X, maxBottomY}
-	}
-	if maxBottomY > corners[3].Y && maxBottomY < height-5 {
-		corners[3] = image.Point{corners[3].X, maxBottomY}
+	// Use median instead of maximum to avoid outliers
+	if len(bottomYSamples) > 0 {
+		medianBottomY := medianInt(bottomYSamples)
+		// Only update if it's not too far from current position (within 20 pixels)
+		if medianBottomY > corners[2].Y && medianBottomY-corners[2].Y <= 20 {
+			corners[2] = image.Point{corners[2].X, medianBottomY}
+		}
+		if medianBottomY > corners[3].Y && medianBottomY-corners[3].Y <= 20 {
+			corners[3] = image.Point{corners[3].X, medianBottomY}
+		}
 	}
 
 	// For right corners, find where the white border actually ends on the right side
-	// Sample at multiple Y positions and use the maximum X found
+	// Sample at multiple Y positions to find the inner edge consistently
 	rightTopY := corners[1].Y
 	rightBottomY := corners[2].Y
 
-	maxRightX := 0
+	// Collect samples to find a reliable right edge
+	rightXSamples := []int{}
 	// Sample at several positions along the right edge
 	for i := 0; i < 5; i++ {
 		// Sample from 20 pixels inside the top/bottom edges to avoid corners
@@ -1332,18 +1459,21 @@ func refineWhiteBorderCorners(gray [][]int, corners []image.Point, width, height
 			sampleY := rightTopY + rightMargin + i*(rightBottomY-rightTopY-2*rightMargin)/4
 			if sampleY >= 0 && sampleY < height {
 				x := findWhiteBorderEdgeFromRight(gray, sampleY, width)
-				if x > maxRightX {
-					maxRightX = x
+				if x > 0 && x < width-5 {
+					rightXSamples = append(rightXSamples, x)
 				}
 			}
 		}
 	}
 
-	// Only update bottom-right corner (not top-right) if we found a valid edge
-	// that's further right than current but not too far (within 20 pixels)
-	// Top-right often needs to be at the inner edge (checkerboard start) due to coordinate labels
-	if maxRightX > corners[2].X && maxRightX < width-5 && maxRightX-corners[2].X <= 20 {
-		corners[2] = image.Point{maxRightX, corners[2].Y}
+	// Use median instead of maximum to avoid outliers
+	// Only update bottom-right corner (not top-right) due to coordinate labels
+	if len(rightXSamples) > 0 {
+		medianRightX := medianInt(rightXSamples)
+		// Only update if it's not too far from current position (within 20 pixels)
+		if medianRightX > corners[2].X && medianRightX-corners[2].X <= 20 {
+			corners[2] = image.Point{medianRightX, corners[2].Y}
+		}
 	}
 
 	return corners
@@ -1378,14 +1508,38 @@ func findWhiteBorderEdgeFromTop(gray [][]int, x, height int) int {
 // to find where the white border transitions to dark (the inner edge of the border)
 func findWhiteBorderEdgeFromBottom(gray [][]int, x, height int) int {
 	// Start from bottom, look for bright -> dark transition
+	// Use a more nuanced approach to find the actual board edge
 	foundBright := false
+	lastBrightY := height - 1
+
 	for y := height - 1; y > height/2; y-- {
 		brightness := gray[y][x]
 		if brightness > 150 {
 			foundBright = true
-		} else if foundBright && brightness < 100 {
-			// Found the inner edge of the white border
-			return y
+			lastBrightY = y
+		} else if foundBright && brightness < 120 {
+			// Found darker region after white
+			// The edge is at the last bright position
+			// But scan a bit further to find the strongest edge
+			bestEdgeY := lastBrightY
+			bestGrad := 0
+
+			// Look in a small window around the transition for the strongest edge
+			for checkY := lastBrightY - 10; checkY <= lastBrightY+5; checkY++ {
+				if checkY < 2 || checkY >= height-2 {
+					continue
+				}
+				grad := abs(gray[checkY+1][x] - gray[checkY-1][x])
+				if grad > bestGrad {
+					bestGrad = grad
+					bestEdgeY = checkY
+				}
+			}
+
+			if bestGrad > 30 {
+				return bestEdgeY
+			}
+			return lastBrightY
 		}
 	}
 	return height - 1
@@ -1406,6 +1560,73 @@ func findWhiteBorderEdgeFromRight(gray [][]int, y, width int) int {
 		}
 	}
 	return width - 1
+}
+
+// subPixelCornerRefinement performs final sub-pixel refinement of corner positions
+// by finding the maximum gradient in a small window, being conservative to avoid noise
+func subPixelCornerRefinement(gray [][]int, corners []image.Point, width, height int) []image.Point {
+	refined := make([]image.Point, len(corners))
+
+	// Direction toward board center for each corner
+	cornerDirs := [][2]int{
+		{1, 1},   // top-left: board is to the right and down
+		{-1, 1},  // top-right: board is to the left and down
+		{-1, -1}, // bottom-right: board is to the left and up
+		{1, -1},  // bottom-left: board is to the right and up
+	}
+
+	for i, corner := range corners {
+		dirX, dirY := cornerDirs[i][0], cornerDirs[i][1]
+
+		// Compute current gradient at corner position
+		x, y := corner.X, corner.Y
+		if x < 2 || x >= width-2 || y < 2 || y >= height-2 {
+			refined[i] = corner
+			continue
+		}
+
+		currentGradX := abs(gray[y][x+1] - gray[y][x-1])
+		currentGradY := abs(gray[y+1][x] - gray[y-1][x])
+		currentGrad := currentGradX + currentGradY
+
+		// Look in a small 3x3 window only in the direction away from board center
+		// Only move if we find a significantly stronger gradient (30% better)
+		bestX, bestY := corner.X, corner.Y
+		bestGrad := currentGrad
+
+		for dy := -1; dy <= 1; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				// Only consider positions that move away from board center
+				// or stay in place
+				if dx*dirX > 0 || dy*dirY > 0 {
+					continue // Skip positions that move toward board center
+				}
+
+				nx := corner.X + dx
+				ny := corner.Y + dy
+
+				if nx < 2 || nx >= width-2 || ny < 2 || ny >= height-2 {
+					continue
+				}
+
+				// Compute gradient at this position
+				gradX := abs(gray[ny][nx+1] - gray[ny][nx-1])
+				gradY := abs(gray[ny+1][nx] - gray[ny-1][nx])
+				totalGrad := gradX + gradY
+
+				// Only move if gradient is significantly stronger (30% better)
+				if totalGrad > bestGrad*13/10 {
+					bestGrad = totalGrad
+					bestX = nx
+					bestY = ny
+				}
+			}
+		}
+
+		refined[i] = image.Point{bestX, bestY}
+	}
+
+	return refined
 }
 
 func isValidCorner(pt image.Point, width, height int) bool {

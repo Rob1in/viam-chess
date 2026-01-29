@@ -23,12 +23,12 @@ func TestFindBoardCorners(t *testing.T) {
 		{
 			inputFile: "data/board1.jpg",
 			expectedCorners: []image.Point{
-				{390, 48},  // top-left - current best detection (ideal would be 390,48)
+				{390, 48},  // top-left
 				{965, 85},  // top-right
 				{939, 665}, // bottom-right
 				{347, 635}, // bottom-left
 			},
-			tolerance: 13.0, // Tight tolerance to catch regressions
+			tolerance: 3.5, // TL/TR are ~3 pixels off due to chess pieces near top edge
 		},
 		{
 			inputFile: "data/board2.jpg",
@@ -38,7 +38,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{904, 639}, // bottom-right
 				{311, 660}, // bottom-left
 			},
-			tolerance: 7.0,
+			tolerance: 4.0, // TL is ~3.6 pixels off
 		},
 		{
 			inputFile: "data/board3.jpg",
@@ -48,7 +48,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{969, 683}, // bottom-right
 				{271, 697}, // bottom-left
 			},
-			tolerance: 15.0,
+			tolerance: 5.5, // BR is ~5.4 pixels off due to white border complexity
 		},
 		{
 			inputFile: "data/board4.jpg",
@@ -58,7 +58,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{969, 683}, // bottom-right
 				{271, 697}, // bottom-left
 			},
-			tolerance: 11.0,
+			tolerance: 3.5, // BR is ~3.2 pixels off
 		},
 		{
 			inputFile: "data/board5.jpg",
@@ -68,7 +68,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{982, 700}, // bottom-right
 				{283, 705}, // bottom-left
 			},
-			tolerance: 7.0,
+			tolerance: 2.5, // All corners within ~2.2 pixels
 		},
 		{
 			inputFile: "data/board6.jpg",
@@ -78,7 +78,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{992, 695}, // bottom-right
 				{293, 699}, // bottom-left
 			},
-			tolerance: 7.0,
+			tolerance: 2.5, // All corners within ~2.2 pixels
 		},
 	}
 
