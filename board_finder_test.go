@@ -23,12 +23,12 @@ func TestFindBoardCorners(t *testing.T) {
 		{
 			inputFile: "data/board1.jpg",
 			expectedCorners: []image.Point{
-				{392, 54},  // top-left
+				{392, 54},  // top-left - current best detection (ideal would be 390,48)
 				{965, 79},  // top-right
 				{938, 664}, // bottom-right
 				{359, 636}, // bottom-left
 			},
-			tolerance: 5.0,
+			tolerance: 2.0, // Tight tolerance to catch regressions
 		},
 		{
 			inputFile: "data/board2.jpg",

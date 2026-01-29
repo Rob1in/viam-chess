@@ -1167,7 +1167,6 @@ func findNearestEdgeX(gray [][]int, startX, y, searchDir, width, maxDist int) in
 		// Gradient in X direction (detecting vertical edges)
 		grad := abs(gray[y][x+1] - gray[y][x-1])
 
-		// Find the strongest gradient
 		if grad > bestGrad {
 			bestGrad = grad
 			bestX = x
@@ -1199,7 +1198,6 @@ func findNearestEdgeY(gray [][]int, x, startY, searchDir, height, maxDist int) i
 		// Gradient in Y direction (detecting horizontal edges)
 		grad := abs(gray[y+1][x] - gray[y-1][x])
 
-		// Find the strongest gradient
 		if grad > bestGrad {
 			bestGrad = grad
 			bestY = y
