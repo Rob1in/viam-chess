@@ -1,6 +1,7 @@
 package viamchess
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -11,15 +12,97 @@ import (
 	"go.viam.com/test"
 )
 
+type boardTestCase struct {
+	inputFile       string
+	expectedCorners []image.Point
+	tolerance       float64
+}
+
 func TestFindBoardCorners(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/board1.jpg")
+	testCases := []boardTestCase{
+		{
+			inputFile: "data/board1.jpg",
+			expectedCorners: []image.Point{
+				{392, 54},  // top-left
+				{965, 79},  // top-right
+				{938, 664}, // bottom-right
+				{359, 636}, // bottom-left
+			},
+			tolerance: 5.0,
+		},
+		{
+			inputFile: "data/board2.jpg",
+			expectedCorners: []image.Point{
+				{303, 76},  // top-left
+				{883, 56},  // top-right
+				{905, 638}, // bottom-right
+				{311, 654}, // bottom-left
+			},
+			tolerance: 2.0,
+		},
+		{
+			inputFile: "data/board3.jpg",
+			expectedCorners: []image.Point{
+				{269, 7},   // top-left
+				{952, 5},   // top-right
+				{970, 697}, // bottom-right
+				{275, 697}, // bottom-left
+			},
+			tolerance: 2.0,
+		},
+		{
+			inputFile: "data/board4.jpg",
+			expectedCorners: []image.Point{
+				{269, 7},   // top-left
+				{953, 5},   // top-right
+				{968, 693}, // bottom-right
+				{271, 697}, // bottom-left
+			},
+			tolerance: 2.0,
+		},
+		{
+			inputFile: "data/board5.jpg",
+			expectedCorners: []image.Point{
+				{295, 17},  // top-left
+				{967, 16},  // top-right
+				{983, 701}, // bottom-right
+				{283, 705}, // bottom-left
+			},
+			tolerance: 7.0,
+		},
+		{
+			inputFile: "data/board6.jpg",
+			expectedCorners: []image.Point{
+				{305, 10},  // top-left
+				{981, 16},  // top-right
+				{996, 698}, // bottom-right
+				{293, 699}, // bottom-left
+			},
+			tolerance: 2.0,
+		},
+	}
+
+	for _, tc := range testCases {
+		// Extract test name from input file (e.g., "data/board1.jpg" -> "board1")
+		name := tc.inputFile[5 : len(tc.inputFile)-4] // Remove "data/" prefix and ".jpg" suffix
+		t.Run(name, func(t *testing.T) {
+			testBoardCornerDetection(t, tc)
+		})
+	}
+}
+
+func testBoardCornerDetection(t *testing.T, tc boardTestCase) {
+	// Read input image
+	input, err := rimage.ReadImageFromFile(tc.inputFile)
 	test.That(t, err, test.ShouldBeNil)
 
+	// Find board corners
 	corners, err := findBoard(input)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, len(corners), test.ShouldEqual, 4)
 
 	t.Logf("Found corners: %v", corners)
+	t.Logf("Image size: %dx%d", input.Bounds().Dx(), input.Bounds().Dy())
 
 	// Draw corners on output image
 	output := image.NewRGBA(input.Bounds())
@@ -33,20 +116,15 @@ func TestFindBoardCorners(t *testing.T) {
 	}
 
 	// Save output image
-	err = rimage.WriteImageToFile("data/board1_output.jpg", output)
+	// Extract base name from input file (e.g., "data/board1.jpg" -> "board1")
+	baseName := tc.inputFile[5 : len(tc.inputFile)-4]
+	outputFile := fmt.Sprintf("data/%s_output.jpg", baseName)
+	err = rimage.WriteImageToFile(outputFile, output)
 	test.That(t, err, test.ShouldBeNil)
-	t.Log("Saved output image to data/board1_output.jpg")
+	t.Logf("Saved output image to %s", outputFile)
 
-	// Check all 4 expected corners (from edge-refined line intersection)
-	expectedCorners := []image.Point{
-		{392, 54},  // top-left
-		{965, 79},  // top-right
-		{938, 664}, // bottom-right
-		{359, 636}, // bottom-left
-	}
-
-	tolerance := 5.0
-	for _, expected := range expectedCorners {
+	// Verify corners match expected values within tolerance
+	for _, expected := range tc.expectedCorners {
 		minDist := math.MaxFloat64
 		var closestCorner image.Point
 		for _, corner := range corners {
@@ -59,7 +137,7 @@ func TestFindBoardCorners(t *testing.T) {
 			}
 		}
 		t.Logf("Expected %v, closest found: %v, distance: %.1f pixels", expected, closestCorner, minDist)
-		test.That(t, minDist, test.ShouldBeLessThan, tolerance)
+		test.That(t, minDist, test.ShouldBeLessThan, tc.tolerance)
 	}
 }
 
@@ -85,269 +163,5 @@ func drawCross(img *image.RGBA, cx, cy, size int, c color.Color) {
 		if cx >= 0 && cx < img.Bounds().Max.X && y >= 0 && y < img.Bounds().Max.Y {
 			img.Set(cx, y, c)
 		}
-	}
-}
-
-func TestFindBoardCorners3(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/board3.jpg")
-	test.That(t, err, test.ShouldBeNil)
-
-	corners, err := findBoard(input)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(corners), test.ShouldEqual, 4)
-
-	t.Logf("Found corners: %v", corners)
-
-	// Draw corners on output image
-	output := image.NewRGBA(input.Bounds())
-	draw.Draw(output, input.Bounds(), input, image.Point{}, draw.Src)
-
-	// Mark each corner with a red circle
-	red := color.RGBA{255, 0, 0, 255}
-	for _, corner := range corners {
-		drawCircle(output, corner.X, corner.Y, 10, red)
-		drawCross(output, corner.X, corner.Y, 15, red)
-	}
-
-	// Save output image
-	err = rimage.WriteImageToFile("data/board3_output.jpg", output)
-	test.That(t, err, test.ShouldBeNil)
-	t.Log("Saved output image to data/board3_output.jpg")
-
-	// Check all 4 expected corners (from edge-refined line intersection)
-	expectedCorners := []image.Point{
-		{269, 7},   // top-left
-		{952, 5},   // top-right
-		{970, 697}, // bottom-right
-		{275, 697}, // bottom-left
-	}
-
-	tolerance := 2.0
-	for _, expected := range expectedCorners {
-		minDist := math.MaxFloat64
-		var closestCorner image.Point
-		for _, corner := range corners {
-			dx := float64(corner.X - expected.X)
-			dy := float64(corner.Y - expected.Y)
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < minDist {
-				minDist = dist
-				closestCorner = corner
-			}
-		}
-		t.Logf("Expected %v, closest found: %v, distance: %.1f pixels", expected, closestCorner, minDist)
-		test.That(t, minDist, test.ShouldBeLessThan, tolerance)
-	}
-}
-
-func TestFindBoardCorners2(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/board2.jpg")
-	test.That(t, err, test.ShouldBeNil)
-
-	corners, err := findBoard(input)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(corners), test.ShouldEqual, 4)
-
-	t.Logf("Found corners: %v", corners)
-
-	// Draw corners on output image
-	output := image.NewRGBA(input.Bounds())
-	draw.Draw(output, input.Bounds(), input, image.Point{}, draw.Src)
-
-	// Mark each corner with a red circle
-	red := color.RGBA{255, 0, 0, 255}
-	for _, corner := range corners {
-		drawCircle(output, corner.X, corner.Y, 10, red)
-		drawCross(output, corner.X, corner.Y, 15, red)
-	}
-
-	// Save output image
-	err = rimage.WriteImageToFile("data/board2_output.jpg", output)
-	test.That(t, err, test.ShouldBeNil)
-	t.Log("Saved output image to data/board2_output.jpg")
-
-	// Check all 4 expected corners (from line intersection detection)
-	expectedCorners := []image.Point{
-		{303, 76},  // top-left
-		{883, 56},  // top-right
-		{905, 638}, // bottom-right
-		{311, 654}, // bottom-left
-	}
-
-	tolerance := 2.0
-	for _, expected := range expectedCorners {
-		minDist := math.MaxFloat64
-		var closestCorner image.Point
-		for _, corner := range corners {
-			dx := float64(corner.X - expected.X)
-			dy := float64(corner.Y - expected.Y)
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < minDist {
-				minDist = dist
-				closestCorner = corner
-			}
-		}
-		t.Logf("Expected %v, closest found: %v, distance: %.1f pixels", expected, closestCorner, minDist)
-		test.That(t, minDist, test.ShouldBeLessThan, tolerance)
-	}
-}
-
-func TestFindBoardCorners4(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/board4.jpg")
-	test.That(t, err, test.ShouldBeNil)
-
-	corners, err := findBoard(input)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(corners), test.ShouldEqual, 4)
-
-	t.Logf("Found corners: %v", corners)
-	t.Logf("Image size: %dx%d", input.Bounds().Dx(), input.Bounds().Dy())
-
-	// Draw corners on output image
-	output := image.NewRGBA(input.Bounds())
-	draw.Draw(output, input.Bounds(), input, image.Point{}, draw.Src)
-
-	// Mark each corner with a red circle
-	red := color.RGBA{255, 0, 0, 255}
-	for _, corner := range corners {
-		drawCircle(output, corner.X, corner.Y, 10, red)
-		drawCross(output, corner.X, corner.Y, 15, red)
-	}
-
-	// Save output image
-	err = rimage.WriteImageToFile("data/board4_output.jpg", output)
-	test.That(t, err, test.ShouldBeNil)
-	t.Log("Saved output image to data/board4_output.jpg")
-
-	// Check all 4 expected corners (from edge-refined line intersection)
-	expectedCorners := []image.Point{
-		{269, 7},   // top-left
-		{953, 5},   // top-right
-		{968, 693}, // bottom-right
-		{271, 697}, // bottom-left
-	}
-
-	tolerance := 2.0
-	for _, expected := range expectedCorners {
-		minDist := math.MaxFloat64
-		var closestCorner image.Point
-		for _, corner := range corners {
-			dx := float64(corner.X - expected.X)
-			dy := float64(corner.Y - expected.Y)
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < minDist {
-				minDist = dist
-				closestCorner = corner
-			}
-		}
-		t.Logf("Expected %v, closest found: %v, distance: %.1f pixels", expected, closestCorner, minDist)
-		test.That(t, minDist, test.ShouldBeLessThan, tolerance)
-	}
-}
-
-func TestFindBoardCorners5(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/board5.jpg")
-	test.That(t, err, test.ShouldBeNil)
-
-	corners, err := findBoard(input)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(corners), test.ShouldEqual, 4)
-
-	t.Logf("Found corners: %v", corners)
-	t.Logf("Image size: %dx%d", input.Bounds().Dx(), input.Bounds().Dy())
-
-	// Draw corners on output image
-	output := image.NewRGBA(input.Bounds())
-	draw.Draw(output, input.Bounds(), input, image.Point{}, draw.Src)
-
-	// Mark each corner with a red circle
-	red := color.RGBA{255, 0, 0, 255}
-	for _, corner := range corners {
-		drawCircle(output, corner.X, corner.Y, 10, red)
-		drawCross(output, corner.X, corner.Y, 15, red)
-	}
-
-	// Save output image
-	err = rimage.WriteImageToFile("data/board5_output.jpg", output)
-	test.That(t, err, test.ShouldBeNil)
-	t.Log("Saved output image to data/board5_output.jpg")
-
-	// Expected corners for board5 (white border with coordinates, rotated 180 deg)
-	expectedCorners := []image.Point{
-		{295, 17},  // top-left
-		{967, 16},  // top-right
-		{983, 701}, // bottom-right
-		{283, 705}, // bottom-left
-	}
-
-	tolerance := 7.0
-	for _, expected := range expectedCorners {
-		minDist := math.MaxFloat64
-		var closestCorner image.Point
-		for _, corner := range corners {
-			dx := float64(corner.X - expected.X)
-			dy := float64(corner.Y - expected.Y)
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < minDist {
-				minDist = dist
-				closestCorner = corner
-			}
-		}
-		t.Logf("Expected %v, closest found: %v, distance: %.1f pixels", expected, closestCorner, minDist)
-		test.That(t, minDist, test.ShouldBeLessThan, tolerance)
-	}
-}
-
-func TestFindBoardCorners6(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/board6.jpg")
-	test.That(t, err, test.ShouldBeNil)
-
-	corners, err := findBoard(input)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(corners), test.ShouldEqual, 4)
-
-	t.Logf("Found corners: %v", corners)
-	t.Logf("Image size: %dx%d", input.Bounds().Dx(), input.Bounds().Dy())
-
-	// Draw corners on output image
-	output := image.NewRGBA(input.Bounds())
-	draw.Draw(output, input.Bounds(), input, image.Point{}, draw.Src)
-
-	// Mark each corner with a red circle
-	red := color.RGBA{255, 0, 0, 255}
-	for _, corner := range corners {
-		drawCircle(output, corner.X, corner.Y, 10, red)
-		drawCross(output, corner.X, corner.Y, 15, red)
-	}
-
-	// Save output image
-	err = rimage.WriteImageToFile("data/board6_output.jpg", output)
-	test.That(t, err, test.ShouldBeNil)
-	t.Log("Saved output image to data/board6_output.jpg")
-
-	// Expected corners for board6 (white border with coordinates, angled perspective)
-	// Achieved high precision with white border refinement
-	expectedCorners := []image.Point{
-		{305, 10},  // top-left - perfect
-		{981, 16},  // top-right - very close to ideal
-		{996, 698}, // bottom-right - perfect
-		{293, 699}, // bottom-left - perfect
-	}
-
-	tolerance := 2.0 // Tight tolerance to prevent regression
-	for _, expected := range expectedCorners {
-		minDist := math.MaxFloat64
-		var closestCorner image.Point
-		for _, corner := range corners {
-			dx := float64(corner.X - expected.X)
-			dy := float64(corner.Y - expected.Y)
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < minDist {
-				minDist = dist
-				closestCorner = corner
-			}
-		}
-		t.Logf("Expected %v, closest found: %v, distance: %.1f pixels", expected, closestCorner, minDist)
-		test.That(t, minDist, test.ShouldBeLessThan, tolerance)
 	}
 }
