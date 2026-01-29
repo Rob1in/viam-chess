@@ -83,9 +83,7 @@ func TestFindBoardCorners(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		// Extract test name from input file (e.g., "data/board1.jpg" -> "board1")
-		name := tc.inputFile[5 : len(tc.inputFile)-4] // Remove "data/" prefix and ".jpg" suffix
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.inputFile, func(t *testing.T) {
 			testBoardCornerDetection(t, tc)
 		})
 	}

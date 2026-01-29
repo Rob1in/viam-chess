@@ -43,7 +43,6 @@ var ChessModel = family.WithModel("chess")
 const safeZ = 200.0
 
 func init() {
-	enableTracing()
 	resource.RegisterService(generic.API, ChessModel,
 		resource.Registration[resource.Resource, *ChessConfig]{
 			Constructor: newViamChessChess,

@@ -7,7 +7,6 @@ require (
 	github.com/erh/vmodutils v0.3.4
 	github.com/golang/geo v0.0.0-20230421003525-6adc56603217
 	github.com/mitchellh/mapstructure v1.5.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.38.0
 	go.uber.org/multierr v1.11.0
 	go.viam.com/rdk v0.109.0
 	go.viam.com/test v1.2.4
@@ -243,6 +242,7 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.54.0 // indirect
 	go.opentelemetry.io/otel v1.39.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.38.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.39.0 // indirect
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
