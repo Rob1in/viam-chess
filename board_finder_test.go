@@ -48,7 +48,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{969, 683}, // bottom-right
 				{271, 697}, // bottom-left
 			},
-			tolerance: 5.5, // BR is ~5.4 pixels off due to white border complexity
+			tolerance: 5.5,
 		},
 		{
 			inputFile: "data/board4.jpg",
@@ -78,7 +78,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{992, 695}, // bottom-right
 				{293, 699}, // bottom-left
 			},
-			tolerance: 2.5, // All corners within ~2.2 pixels
+			tolerance: 2.5,
 		},
 		{
 			inputFile: "data/board7.jpg",
@@ -88,7 +88,7 @@ func TestFindBoardCorners(t *testing.T) {
 				{984, 698}, // bottom-right
 				{284, 707}, // bottom-left
 			},
-			tolerance: 15.0, // White-bordered board with labels - will refine
+			tolerance: 5.0,
 		},
 	}
 
