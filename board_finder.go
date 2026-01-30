@@ -1490,7 +1490,7 @@ func refineWhiteBorderCorners(gray [][]int, corners []image.Point, width, height
 			// Check if the first few rows (Y=0 to Y=5) are bright at this X position
 			brightRowCount := 0
 			for y := 0; y < 6 && y < height; y++ {
-				if gray[y][sampleX] > 180 {  // Stricter threshold: 180 instead of 150
+				if gray[y][sampleX] > 180 { // Stricter threshold: 180 instead of 150
 					brightRowCount++
 				}
 			}

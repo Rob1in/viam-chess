@@ -210,12 +210,11 @@ type MoveCmd struct {
 }
 
 type cmdStruct struct {
-	Move   MoveCmd
-	Go     int
-	Reset  bool
-	Wipe   bool
-	Center bool
-	Skill  float64
+	Move  MoveCmd
+	Go    int
+	Reset bool
+	Wipe  bool
+	Skill float64
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -281,10 +280,6 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 
 	if cmd.Wipe {
 		return nil, s.wipe(ctx)
-	}
-
-	if cmd.Center {
-		return nil, s.centerCamera(ctx)
 	}
 
 	if cmd.Skill > 0 {
@@ -881,59 +876,6 @@ func (s *viamChessChess) checkPositionForMoves(ctx context.Context, all viscaptu
 	}
 
 	return fmt.Errorf("no valid moves from: %v to %v found out of %d", from, to, len(moves))
-}
-
-func (s *viamChessChess) centerCamera(ctx context.Context) error {
-	err := s.goToStart(ctx)
-	if err != nil {
-		return nil
-	}
-
-	//pose := s.startPose.Pose()
-
-	for {
-		time.Sleep(time.Second)
-
-		all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
-		if err != nil {
-			return err
-		}
-
-		sum := r3.Vector{}
-		for _, pos := range []string{"d1", "e1", "d8", "e8"} {
-			v, err := s.getCenterFor(all, pos, nil)
-			if err != nil {
-				return err
-			}
-			sum = sum.Add(v)
-		}
-		sum = sum.Mul(.25)
-		s.logger.Infof("hi: %v", sum)
-
-		return fmt.Errorf("finish me")
-
-		/*
-			if math.Abs(xDelta) < 3 && math.Abs(float64(yDelta)) < 3 {
-				return nil
-			}
-
-			pose = spatialmath.NewPose(
-				pose.Point().Add(r3.Vector{X: xDelta / 3, Y: yDelta / 3}),
-				pose.Orientation(),
-			)
-
-			s.logger.Infof("updated pose: %v", pose)
-
-			_, err = s.motion.Move(ctx, motion.MoveReq{
-				ComponentName: s.conf.Gripper,
-				Destination:   referenceframe.NewPoseInFrame("world", pose),
-			})
-			if err != nil {
-				return fmt.Errorf("can't move to %v: %w", pose, err)
-			}
-		*/
-
-	}
 }
 
 func squaresSame(a, b []chess.Square) bool {
