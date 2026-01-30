@@ -1,6 +1,7 @@
 package viamchess
 
 import (
+	"image"
 	"testing"
 
 	"go.viam.com/rdk/pointcloud"
@@ -10,21 +11,42 @@ import (
 	"github.com/erh/vmodutils/touch"
 )
 
-func TestPieceFinder1(t *testing.T) {
-	input, err := rimage.ReadImageFromFile("data/hack1.jpg")
-	test.That(t, err, test.ShouldBeNil)
+func TestScale(t *testing.T) {
+	test.That(t, scale(0, 10, .5), test.ShouldEqual, 5)
+	test.That(t, scale(5, 15, .5), test.ShouldEqual, 10)
 
-	pc, err := pointcloud.NewFromFile("data/hack1.pcd", "")
-	test.That(t, err, test.ShouldBeNil)
+}
 
-	squares, err := findBoardAndPieces(input, pc, touch.RealSenseProperties)
-	test.That(t, err, test.ShouldBeNil)
+func TestComputeSquareBounds(t *testing.T) {
 
-	out, err := createDebugImage(input, squares)
-	test.That(t, err, test.ShouldBeNil)
+	corners := []image.Point{
+		{0, 0},
+		{80, 0},
+		{80, 80},
+		{0, 80},
+	}
 
-	err = rimage.WriteImageToFile("hack-test.jpg", out)
-	test.That(t, err, test.ShouldBeNil)
+	res := computeSquareBounds(corners, 0, 0)
+	test.That(t, res.Min.X, test.ShouldEqual, 0)
+	test.That(t, res.Min.Y, test.ShouldEqual, 0)
+
+	test.That(t, res.Max.X, test.ShouldEqual, 10)
+	test.That(t, res.Max.Y, test.ShouldEqual, 10)
+
+	corners = []image.Point{
+		{360, 3},
+		{940, 5},
+		{1011, 688},
+		{257, 680},
+	}
+
+	res = computeSquareBounds(corners, 0, 0)
+	test.That(t, res.Min.X, test.ShouldEqual, 360)
+	test.That(t, res.Min.Y, test.ShouldEqual, 3)
+
+	res = computeSquareBounds(corners, 0, 6)
+	test.That(t, res.Min.X, test.ShouldEqual, 283)
+	test.That(t, res.Min.Y, test.ShouldEqual, 510)
 
 }
 

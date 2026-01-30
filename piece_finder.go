@@ -112,16 +112,54 @@ type squareInfo struct {
 	pc pointcloud.PointCloud
 }
 
+func scale(start, end int, amount float64) int {
+	//fmt.Printf("\t %v %v %v\n", start, end, amount)
+	return int(float64(end-start)*amount) + start
+}
+
+func computeSquareBounds(corners []image.Point, col, row int) image.Rectangle {
+
+	colTopLeft := image.Point{
+		scale(corners[0].X, corners[1].X, float64(col)/8),
+		scale(corners[0].Y, corners[1].Y, float64(col)/8),
+	}
+
+	colTopRight := image.Point{
+		scale(corners[0].X, corners[1].X, float64(1+col)/8),
+		scale(corners[0].Y, corners[1].Y, float64(1+col)/8),
+	}
+
+	colBottomLeft := image.Point{
+		scale(corners[3].X, corners[2].X, float64(col)/8),
+		scale(corners[3].Y, corners[2].Y, float64(col)/8),
+	}
+
+	colBottomRight := image.Point{
+		scale(corners[3].X, corners[2].X, float64(1+col)/8),
+		scale(corners[3].Y, corners[2].Y, float64(1+col)/8),
+	}
+
+	//fmt.Printf("colTopLeft: %v\n", colTopLeft)
+	//fmt.Printf("colBottomLeft: %v\n", colBottomLeft)
+	//fmt.Printf("colTopRight: %v\n", colTopRight)
+	//fmt.Printf("colBottomRight: %v\n", colBottomRight)
+
+	return image.Rect(
+		scale(colTopLeft.X, colBottomLeft.X, float64(row)/8),
+		scale(colTopLeft.Y, colBottomLeft.Y, float64(row)/8),
+		scale(colTopRight.X, colBottomRight.X, float64(row+1)/8),
+		scale(colTopRight.Y, colBottomRight.Y, float64(row+1)/8),
+	)
+}
+
 func findBoardAndPieces(srcImg image.Image, pc pointcloud.PointCloud, props camera.Properties) ([]squareInfo, error) {
 
-	_, err := findBoard(srcImg)
+	corners, err := findBoard(srcImg)
 	if err != nil {
 		return nil, err
 	}
 
-	xOffset := (srcImg.Bounds().Max.X - srcImg.Bounds().Max.Y) / 2
-
-	squareSize := srcImg.Bounds().Max.Y / 8
+	//fmt.Printf("corners: %v\n", corners)
 
 	squares := []squareInfo{}
 
@@ -129,15 +167,7 @@ func findBoardAndPieces(srcImg image.Image, pc pointcloud.PointCloud, props came
 		for file := 'a'; file <= 'h'; file++ {
 			name := fmt.Sprintf("%s%d", string([]byte{byte(file)}), rank)
 
-			xStartOffset := int(('h' - file)) * squareSize
-			yStartOffset := (rank - 1) * squareSize
-
-			srcRect := image.Rect(
-				xStartOffset+xOffset,
-				yStartOffset,
-				xStartOffset+xOffset+squareSize,
-				yStartOffset+squareSize,
-			)
+			srcRect := computeSquareBounds(corners, rank-1, int(file-'a'))
 
 			subPc, err := touch.PCLimitToImageBoxes(pc, []*image.Rectangle{&srcRect}, nil, props)
 			if err != nil {
