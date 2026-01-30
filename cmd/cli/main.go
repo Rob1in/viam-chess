@@ -26,7 +26,7 @@ func realMain() error {
 
 	host := flag.String("host", "", "host")
 	debug := flag.Bool("debug", false, "")
-	cmd := flag.String("cmd", "", "host")
+	cmd := flag.String("cmd", "", "command to execute (move, go, reset, wipe, skill, etc..)")
 
 	from := flag.String("from", "", "")
 	to := flag.String("to", "", "")
@@ -51,6 +51,8 @@ func realMain() error {
 		Arm:         "arm",
 		Gripper:     "gripper",
 		PoseStart:   "hack-pose-look-straight-down",
+		Camera:      "cam",
+		CaptureDir:  "captured-data",
 	}
 	_, _, err := cfg.Validate("")
 	if err != nil {

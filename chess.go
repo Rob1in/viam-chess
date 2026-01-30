@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/multierr"
@@ -17,6 +18,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/components/gripper"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
@@ -55,11 +57,14 @@ type ChessConfig struct {
 
 	Arm     string
 	Gripper string
+	Camera  string
 
 	PoseStart string `json:"pose-start"`
 
 	Engine       string
 	EngineMillis int `json:"engine-millis"`
+
+	CaptureDir string // mostly for vla data
 }
 
 func (cfg *ChessConfig) engine() string {
@@ -90,7 +95,19 @@ func (cfg *ChessConfig) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("need a pose-start")
 	}
 
-	return []string{cfg.PieceFinder, cfg.Arm, cfg.Gripper, cfg.PoseStart, motion.Named("builtin").String()}, nil, nil
+	deps := []string{cfg.PieceFinder, cfg.Arm, cfg.Gripper, cfg.PoseStart, motion.Named("builtin").String()}
+
+	if cfg.Camera != "" {
+		deps = append(deps, cfg.Camera)
+	}
+
+	if cfg.CaptureDir != "" {
+		if cfg.Camera == "" {
+			return nil, nil, fmt.Errorf("need a cam if CaptureDir is set")
+		}
+	}
+
+	return deps, nil, nil
 }
 
 type viamChessChess struct {
@@ -101,12 +118,12 @@ type viamChessChess struct {
 	logger logging.Logger
 	conf   *ChessConfig
 
-	cancelCtx  context.Context
 	cancelFunc func()
 
 	pieceFinder vision.Service
 	arm         arm.Arm
 	gripper     gripper.Gripper
+	cam         camera.Camera
 
 	poseStart toggleswitch.Switch
 
@@ -120,7 +137,9 @@ type viamChessChess struct {
 
 	fenFile string
 
-	doCommandLock sync.Mutex
+	doCommandLock   sync.Mutex
+	doCommandCount  atomic.Int32
+	movePieceStatus atomic.Int32
 }
 
 func newViamChessChess(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (resource.Resource, error) {
@@ -143,7 +162,6 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 		name:        name,
 		logger:      logger,
 		conf:        conf,
-		cancelCtx:   cancelCtx,
 		cancelFunc:  cancelFunc,
 		skillAdjust: 50,
 	}
@@ -161,6 +179,13 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 	s.gripper, err = gripper.FromProvider(deps, conf.Gripper)
 	if err != nil {
 		return nil, err
+	}
+
+	if conf.Camera != "" {
+		s.cam, err = camera.FromProvider(deps, conf.Camera)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	s.poseStart, err = toggleswitch.FromProvider(deps, conf.PoseStart)
@@ -190,8 +215,11 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 		return nil, err
 	}
 
+	go s.runCaptureThread(cancelCtx)
+
 	err = s.engine.Run(uci.CmdUCI, uci.CmdIsReady, uci.CmdUCINewGame) // TODO: not sure this is correct
 	if err != nil {
+		s.cancelFunc()
 		return nil, err
 	}
 
@@ -218,6 +246,7 @@ type cmdStruct struct {
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
+	s.doCommandCount.Add(1)
 	ctx, span := trace.StartSpan(ctx, "chess::DoCommand")
 	defer span.End()
 
@@ -374,6 +403,9 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, th
 }
 
 func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, theState *state, from, to string, m *chess.Move) error {
+	s.movePieceStatus.Add(1)
+	defer s.movePieceStatus.Add(-1)
+
 	ctx, span := trace.StartSpan(ctx, "movePiece")
 	defer span.End()
 
@@ -897,4 +929,28 @@ func squaresSame(a, b []chess.Square) bool {
 		}
 	}
 	return true
+}
+
+func (s *viamChessChess) runCaptureThread(ctx context.Context) {
+	sessionStart := time.Now().Format("2006-01-02-15-04-05")
+	for ctx.Err() == nil {
+
+		if s.movePieceStatus.Load() > 0 {
+			err := s.doCapture(ctx, sessionStart)
+			if err != nil {
+				s.logger.Errorf("error un runJointCaptureThread: %v", err)
+			}
+		}
+
+		time.Sleep(200 * time.Millisecond)
+	}
+
+}
+
+func (s *viamChessChess) doCapture(ctx context.Context, sessionStart string) error {
+	// TODO: capture image from s.cam
+	// TODO: capture joints from s.arm
+	// TODO: store as as a step for s.doCommandCount
+
+	return nil
 }
