@@ -167,7 +167,7 @@ func findBoardAndPieces(srcImg image.Image, pc pointcloud.PointCloud, props came
 		for file := 'a'; file <= 'h'; file++ {
 			name := fmt.Sprintf("%s%d", string([]byte{byte(file)}), rank)
 
-			srcRect := computeSquareBounds(corners, rank-1, int(file-'a'))
+			srcRect := computeSquareBounds(corners, int('h'-file), rank-1)
 
 			subPc, err := touch.PCLimitToImageBoxes(pc, []*image.Rectangle{&srcRect}, nil, props)
 			if err != nil {
