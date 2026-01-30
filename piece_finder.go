@@ -17,7 +17,6 @@ import (
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/pointcloud"
 	"go.viam.com/rdk/resource"
-	"go.viam.com/rdk/rimage"
 	"go.viam.com/rdk/robot/framesystem"
 	"go.viam.com/rdk/services/vision"
 	viz "go.viam.com/rdk/vision"
@@ -113,8 +112,12 @@ type squareInfo struct {
 	pc pointcloud.PointCloud
 }
 
-func BoardDebugImageHack(srcImg image.Image, pc pointcloud.PointCloud, props camera.Properties) (image.Image, []squareInfo, error) {
-	dst := image.NewRGBA(image.Rect(0, 0, srcImg.Bounds().Max.Y, srcImg.Bounds().Max.Y))
+func findBoardAndPieces(srcImg image.Image, pc pointcloud.PointCloud, props camera.Properties) ([]squareInfo, error) {
+
+	_, err := findBoard(srcImg)
+	if err != nil {
+		return nil, err
+	}
 
 	xOffset := (srcImg.Bounds().Max.X - srcImg.Bounds().Max.Y) / 2
 
@@ -136,32 +139,16 @@ func BoardDebugImageHack(srcImg image.Image, pc pointcloud.PointCloud, props cam
 				yStartOffset+squareSize,
 			)
 
-			dstRect := image.Rect(
-				xStartOffset,
-				yStartOffset,
-				xStartOffset+squareSize,
-				yStartOffset+squareSize,
-			)
-
 			subPc, err := touch.PCLimitToImageBoxes(pc, []*image.Rectangle{&srcRect}, nil, props)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 			if subPc.Size() == 0 {
-				return nil, nil, fmt.Errorf("pc for %s is empty in BoardDebugImageHack", name)
+				return nil, fmt.Errorf("pc for %s is empty in findBoardAndPieces", name)
 			}
 
 			pieceColor := estimatePieceColor(subPc)
-			colorNames := []string{"", "W", "B"}
-			meta := colorNames[pieceColor]
-
-			draw.Draw(dst, dstRect, srcImg, srcRect.Min, draw.Src)
-
-			// put name in the middle of that square
-			textX := dstRect.Min.X + squareSize/2 - len(name)*3
-			textY := dstRect.Min.Y + squareSize/2 + 3
-			drawString(dst, textX, textY, name+"-"+meta, color.RGBA{255, 0, 0, 255})
 
 			squares = append(squares, squareInfo{
 				rank,
@@ -174,7 +161,7 @@ func BoardDebugImageHack(srcImg image.Image, pc pointcloud.PointCloud, props cam
 		}
 	}
 
-	return dst, squares, nil
+	return squares, nil
 }
 
 // 0 - blank, 1 - white, 2 - black
@@ -284,8 +271,8 @@ func (bc *PieceFinder) CaptureAllFromCamera(ctx context.Context, cameraName stri
 		return ret, err
 	}
 
-	_, span2 = trace.StartSpan(ctx, "PieceFinder::CaptureAllFromCamera::BoardDebugImageHack")
-	dst, squares, err := BoardDebugImageHack(ret.Image, pc, bc.props)
+	_, span2 = trace.StartSpan(ctx, "PieceFinder::CaptureAllFromCamera::findBoardAndPieces")
+	squares, err := findBoardAndPieces(ret.Image, pc, bc.props)
 	span2.End()
 	if err != nil {
 		return ret, err
@@ -293,13 +280,6 @@ func (bc *PieceFinder) CaptureAllFromCamera(ctx context.Context, cameraName stri
 
 	_, span2 = trace.StartSpan(ctx, "PieceFinder::CaptureAllFromCamera::Finish")
 	defer span2.End()
-
-	if extra["printdst"] == true {
-		err := rimage.WriteImageToFile("hack-test.jpg", dst)
-		if err != nil {
-			bc.logger.Warnf("Writing file failed: %v", err)
-		}
-	}
 
 	ret.Objects = []*viz.Object{}
 	ret.Detections = []objectdetection.Detection{}
@@ -349,4 +329,61 @@ func (bc *PieceFinder) GetProperties(ctx context.Context, extra map[string]inter
 	return &vision.Properties{
 		ObjectPCDsSupported: true,
 	}, nil
+}
+
+func createDebugImage(input image.Image, squares []squareInfo) (image.Image, error) {
+	// Create a copy of the input image to draw on
+	bounds := input.Bounds()
+	dst := image.NewRGBA(bounds)
+	draw.Draw(dst, bounds, input, image.Point{}, draw.Src)
+
+	// Draw debug info for each square
+	for _, sq := range squares {
+		// Draw a rectangle around the square
+		drawRect(dst, sq.originalBounds, color.RGBA{0, 255, 0, 255})
+
+		// Prepare the debug text: square name and piece color
+		colorNames := []string{"", "W", "B"}
+		pieceLabel := colorNames[sq.color]
+		text := fmt.Sprintf("%s-%s", sq.name, pieceLabel)
+
+		// Calculate center of the square for text placement
+		centerX := (sq.originalBounds.Min.X + sq.originalBounds.Max.X) / 2
+		centerY := (sq.originalBounds.Min.Y + sq.originalBounds.Max.Y) / 2
+
+		// Adjust position to center the text (roughly)
+		textX := centerX - len(text)*3
+		textY := centerY + 3
+
+		// Draw the text
+		drawString(dst, textX, textY, text, color.RGBA{255, 0, 0, 255})
+	}
+
+	return dst, nil
+}
+
+// drawRect draws a rectangle outline on the image
+func drawRect(img *image.RGBA, rect image.Rectangle, c color.Color) {
+	// Draw top and bottom lines
+	for x := rect.Min.X; x < rect.Max.X; x++ {
+		if x >= 0 && x < img.Bounds().Max.X {
+			if rect.Min.Y >= 0 && rect.Min.Y < img.Bounds().Max.Y {
+				img.Set(x, rect.Min.Y, c)
+			}
+			if rect.Max.Y-1 >= 0 && rect.Max.Y-1 < img.Bounds().Max.Y {
+				img.Set(x, rect.Max.Y-1, c)
+			}
+		}
+	}
+	// Draw left and right lines
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		if y >= 0 && y < img.Bounds().Max.Y {
+			if rect.Min.X >= 0 && rect.Min.X < img.Bounds().Max.X {
+				img.Set(rect.Min.X, y, c)
+			}
+			if rect.Max.X-1 >= 0 && rect.Max.X-1 < img.Bounds().Max.X {
+				img.Set(rect.Max.X-1, y, c)
+			}
+		}
+	}
 }
