@@ -110,7 +110,6 @@ func TestFindBoardCorners(t *testing.T) {
 			},
 			tolerance: 2.5,
 		},
-
 	}
 
 	for _, tc := range testCases {
