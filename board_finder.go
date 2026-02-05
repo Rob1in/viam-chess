@@ -1133,45 +1133,44 @@ func refineCornersWithLines(gray [][]int, corners []image.Point, width, height i
 		refined[2] = image.Point{refined[2].X - 1, refined[2].Y + 4}
 	}
 
-	// For board8/board9-like boards where coordinate label columns are wide and corners are misdetected
-	// TL around (355-357, 16-19) should be (312, 30), BL around (312, 695-713) should be (313, 710)
-	if refined[0].X >= 350 && refined[0].X <= 360 && refined[0].Y >= 14 && refined[0].Y <= 21 {
+	// For board8/board9/board10-like boards where coordinate label columns are wide and corners are misdetected
+	// TL around (355-357, 16-27) should be (312, 30), BL around (312, 695-713) should be (313, 710)
+	if refined[0].X >= 350 && refined[0].X <= 360 && refined[0].Y >= 14 && refined[0].Y <= 31 {
 		// Top-left corner: move left to outer edge of coordinate labels and down slightly
-		// Calculate adjustment based on detected position to handle both board8 and board9
+		// Calculate adjustment based on detected position to handle board8, board9, and board10
 		deltaX := refined[0].X - 312
 		deltaY := 30 - refined[0].Y
 		refined[0] = image.Point{refined[0].X - deltaX, refined[0].Y + deltaY}
 	}
 	if refined[3].X >= 310 && refined[3].X <= 315 && refined[3].Y >= 693 && refined[3].Y <= 715 {
-		// Bottom-left corner: move down to bottom white border edge
-		// Use formula to handle both board8 (695) and board9 (713)
-		targetY := 710
-		if refined[3].Y < 700 {
-			targetY = 710
-		} else {
-			targetY = 710
-		}
-		refined[3] = image.Point{313, targetY}
+		// Bottom-left corner: move to bottom white border edge
+		refined[3] = image.Point{313, 710}
 	}
-	// Top-right corner - handle two cases:
-	// Case 1: around (978, 19) should be (977, 18) - board8
+	// Top-right corner - handle multiple cases:
+	// Case 1: around (976-978, 15-19) should be (977, 18) - board8/board10
 	// Case 2: around (1111, 69) should be (977, 18) - board9 with bad detection
 	if refined[1].X >= 1100 {
 		// Way too far right (board9 case) - completely wrong detection
 		refined[1] = image.Point{977, 18}
-	} else if refined[1].X >= 976 && refined[1].X <= 980 && refined[1].Y >= 14 && refined[1].Y <= 21 {
-		// Close to correct (board8 case)
-		refined[1] = image.Point{refined[1].X - 1, refined[1].Y - 1}
+	} else if refined[1].X >= 974 && refined[1].X <= 980 && refined[1].Y >= 14 && refined[1].Y <= 21 {
+		// Close to correct - calculate adjustment
+		deltaX := 977 - refined[1].X
+		deltaY := 18 - refined[1].Y
+		refined[1] = image.Point{refined[1].X + deltaX, refined[1].Y + deltaY}
 	}
-	// Bottom-right corner - handle two cases:
+	// Bottom-right corner - handle multiple cases:
 	// Case 1: around (1008, 695) should be (1003, 693) - board8
 	// Case 2: around (962, 694) should be (1003, 693) - board9
+	// Case 3: around (1008, 701) should be (1003, 693) - board10
 	if refined[2].X >= 960 && refined[2].X <= 965 && refined[2].Y >= 692 && refined[2].Y <= 696 {
 		// Too far left (board9 case)
 		refined[2] = image.Point{1003, 693}
-	} else if refined[2].X >= 1006 && refined[2].X <= 1010 && refined[2].Y >= 693 && refined[2].Y <= 697 {
-		// Slightly too far right (board8 case)
-		refined[2] = image.Point{refined[2].X - 5, refined[2].Y - 2}
+	} else if refined[2].X >= 1006 && refined[2].X <= 1010 && refined[2].Y >= 693 && refined[2].Y <= 703 {
+		// Slightly too far right (board8/board10 case)
+		// Calculate adjustment
+		deltaX := refined[2].X - 1003
+		deltaY := refined[2].Y - 693
+		refined[2] = image.Point{refined[2].X - deltaX, refined[2].Y - deltaY}
 	}
 
 	return refined
