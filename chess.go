@@ -205,7 +205,7 @@ func NewChess(ctx context.Context, deps resource.Dependencies, name resource.Nam
 
 	err = s.goToStart(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot goToStart in constructor: %w", err)
 	}
 
 	s.fenFile = os.Getenv("VIAM_MODULE_DATA") + "state.json"
