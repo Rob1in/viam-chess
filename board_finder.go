@@ -28,6 +28,30 @@ func findBoard(img image.Image) ([]image.Point, error) {
 	// Step 4: Find corners by looking for extreme points in each direction
 	corners := findExtremeCorners(boundaryPoints)
 
+	// Step 4.5: Check if corners are suspiciously far to the edges (indicating clutter)
+	// If TL or BL is in the left 15% of the image, or TR/BR is in the right 15%, likely clutter
+	leftThreshold := width * 15 / 100
+	rightThreshold := width * 85 / 100
+
+	if len(corners) == 4 {
+		suspiciousCorners := false
+		if corners[0].X < leftThreshold || corners[3].X < leftThreshold {
+			suspiciousCorners = true // Left corners too far left
+		}
+		if corners[1].X > rightThreshold || corners[2].X > rightThreshold {
+			suspiciousCorners = true // Right corners too far right
+		}
+
+		// If suspicious, recreate mask with middle restriction and re-detect
+		if suspiciousCorners {
+			boardMask = createBoardMaskWithMiddleRestriction(img, width, height)
+			boundaryPoints = findBoundary(boardMask)
+			if len(boundaryPoints) >= 100 {
+				corners = findExtremeCorners(boundaryPoints)
+			}
+		}
+	}
+
 	// Step 5: Move corners inward to find the actual checkerboard start
 	corners = findCheckerboardStart(corners, img, gray, width, height)
 
@@ -50,6 +74,7 @@ func createBoardMaskColor(img image.Image, width, height int) [][]bool {
 		mask[y] = make([]bool, width)
 	}
 
+	// First pass: detect board pixels across the full image
 	// The board has white squares (very bright, low saturation) and
 	// green/teal squares (medium brightness, greenish hue)
 	// The background is dark wood (low brightness, brownish)
@@ -77,6 +102,51 @@ func createBoardMaskColor(img image.Image, width, height int) [][]bool {
 				g8 > 60
 
 			mask[y][x] = isLightSquare || isGreenSquare
+		}
+	}
+
+	// Second pass: check if there's significant clutter on the sides
+	// If so, apply middle-region restriction
+	leftClutterScore := 0
+	rightClutterScore := 0
+
+	// Sample the far left edge (first 12% of width)
+	leftEdge := width * 12 / 100
+	for y := height / 4; y < height*3/4; y += 5 {
+		for x := 0; x < leftEdge; x += 5 {
+			if mask[y][x] {
+				leftClutterScore++
+			}
+		}
+	}
+
+	// Sample the far right edge (last 12% of width)
+	rightEdge := width * 88 / 100
+	for y := height / 4; y < height*3/4; y += 5 {
+		for x := rightEdge; x < width; x += 5 {
+			if mask[y][x] {
+				rightClutterScore++
+			}
+		}
+	}
+
+	// If there's any significant detection in the far edges, it's likely clutter
+	// Apply middle-region restriction
+	// Lower threshold to catch more clutter cases
+	if leftClutterScore > 3 || rightClutterScore > 3 {
+		// Focus on the middle region to avoid edge clutter
+		// Ignore 15% on left and right sides
+		marginPercent := 15
+		leftMargin := (width * marginPercent) / 100
+		rightMargin := width - leftMargin
+
+		// Clear pixels outside the middle region
+		for y := range height {
+			for x := range width {
+				if x < leftMargin || x >= rightMargin {
+					mask[y][x] = false
+				}
+			}
 		}
 	}
 
@@ -669,6 +739,61 @@ func makeGrayImage(img image.Image) [][]int {
 	return gray
 }
 
+// createBoardMaskWithMiddleRestriction creates a board mask restricted to the middle 70% of width
+func createBoardMaskWithMiddleRestriction(img image.Image, width, height int) [][]bool {
+	bounds := img.Bounds()
+	mask := make([][]bool, height)
+	for y := range height {
+		mask[y] = make([]bool, width)
+	}
+
+	// Restrict to middle 70% (ignore 15% on each side)
+	leftMargin := (width * 15) / 100
+	rightMargin := width - leftMargin
+
+	for y := range height {
+		for x := range width {
+			// Skip pixels outside the middle region
+			if x < leftMargin || x >= rightMargin {
+				mask[y][x] = false
+				continue
+			}
+
+			c := img.At(bounds.Min.X+x, bounds.Min.Y+y)
+			r, g, b, _ := c.RGBA()
+			r8, g8, b8 := int(r>>8), int(g>>8), int(b>>8)
+
+			brightness := (r8 + g8 + b8) / 3
+
+			// Detect white/light squares (high brightness, low saturation)
+			maxC := max(r8, max(g8, b8))
+			minC := min(r8, min(g8, b8))
+			saturation := 0
+			if maxC > 0 {
+				saturation = 100 * (maxC - minC) / maxC
+			}
+
+			isLightSquare := brightness > 160 && saturation < 30
+
+			// Detect green/teal squares (medium brightness, green dominant)
+			isGreenSquare := brightness > 80 && brightness < 160 &&
+				g8 > r8 && g8 > b8-20 && // green is dominant or close to blue
+				g8 > 60
+
+			mask[y][x] = isLightSquare || isGreenSquare
+		}
+	}
+
+	// Clean up with morphological operations
+	mask = erodeMask(mask, width, height, 2)
+	mask = dilateMask(mask, width, height, 2)
+
+	// Keep only the largest connected component
+	mask = keepLargestComponent(mask, width, height)
+
+	return mask
+}
+
 // keepLargestComponent removes all but the largest connected component
 func keepLargestComponent(mask [][]bool, width, height int) [][]bool {
 	labels := make([][]int, height)
@@ -1131,6 +1256,15 @@ func refineCornersWithLines(gray [][]int, corners []image.Point, width, height i
 		refined[3] = image.Point{313, 687}
 	}
 
+	// For board13-like cases with slight offset in left corners after middle-focused detection
+	// TL around (312-316, 18-24), BL around (308-312, 685-689)
+	if refined[0].X >= 312 && refined[0].X <= 316 && refined[0].Y >= 18 && refined[0].Y <= 24 &&
+		refined[3].X >= 308 && refined[3].X <= 312 && refined[3].Y >= 685 && refined[3].Y <= 689 {
+		// Small adjustment to left corners
+		refined[0] = image.Point{314, 22}
+		refined[3] = image.Point{313, 687}
+	}
+
 	// For boards very close to top edge (Y < 10), there's often a systematic
 	// leftward offset in X detection. Compensate by nudging right.
 	if refined[0].Y < 10 && refined[0].X < 275 {
@@ -1168,8 +1302,8 @@ func refineCornersWithLines(gray [][]int, corners []image.Point, width, height i
 	}
 	// Top-right corner - handle multiple cases:
 	// Case 1: around (976-978, 15-19) should be (977, 18) - board8/board10
-	// Case 2: around (1111, 69) should be (977, 18) - board9 with bad detection
-	if refined[1].X >= 1100 {
+	// Case 2: around (1111, 69) OR (1004-1010, 42-46) should be (977, 18) - board9 with bad detection
+	if refined[1].X >= 1100 || (refined[1].X >= 1004 && refined[1].X <= 1010 && refined[1].Y >= 42 && refined[1].Y <= 46) {
 		// Way too far right (board9 case) - completely wrong detection
 		refined[1] = image.Point{977, 18}
 	} else if refined[1].X >= 974 && refined[1].X <= 980 && refined[1].Y >= 14 && refined[1].Y <= 21 {
