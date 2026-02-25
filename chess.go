@@ -403,7 +403,8 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, th
 }
 
 func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, theState *state, from, to string, m *chess.Move) error {
-	s.logger.Infof("MOVING A PIECE.")
+	s.logger.Info("MOVING A PIECE.")
+	s.logger.Error("Hi Robin can you see this??")
 	s.movePieceStatus.Add(1)
 	defer s.movePieceStatus.Add(-1)
 
