@@ -436,12 +436,13 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 
 	useZ := 100.0
 
+	const magicMin = 12.0
 	{
 		center, err := s.getCenterFor(data, from, theState)
 		if err != nil {
 			return err
 		}
-		useZ = center.Z
+		useZ = max(magicMin, center.Z) // HACK 5 should not be there
 
 		err = s.setupGripper(ctx)
 		if err != nil {
@@ -468,7 +469,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			}
 
 			useZ -= 10
-			if useZ < 12 { // todo: magic number
+			if useZ < magicMin { // todo: magic number
 				return fmt.Errorf("couldn't grab, and scared to go lower")
 			}
 
