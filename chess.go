@@ -246,6 +246,7 @@ type cmdStruct struct {
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
+	s.logger.Errorf("DoCommand called: %v", cmdMap)
 	s.doCommandCount.Add(1)
 	ctx, span := trace.StartSpan(ctx, "chess::DoCommand")
 	defer span.End()
