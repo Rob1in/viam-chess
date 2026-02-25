@@ -442,7 +442,10 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		if err != nil {
 			return err
 		}
+
 		useZ = max(magicMin, center.Z) // HACK 5 should not be there
+		s.logger.Infof("WE'RE MOVING TO useZ=%f", useZ)
+
 
 		err = s.setupGripper(ctx)
 		if err != nil {
@@ -482,6 +485,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			time.Sleep(250 * time.Millisecond)
 		}
 
+		
 		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, safeZ})
 		if err != nil {
 			return err
