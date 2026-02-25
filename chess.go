@@ -403,6 +403,7 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, th
 }
 
 func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCapture, theState *state, from, to string, m *chess.Move) error {
+	s.logger.Infof("MOVING A PIECE.")
 	s.movePieceStatus.Add(1)
 	defer s.movePieceStatus.Add(-1)
 
@@ -435,6 +436,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	}
 
 	useZ := 100.0
+	s.logger.Infof("Okay doing a move with useZ=%f", useZ)
 
 	const magicMin = 12.0
 	{
@@ -445,6 +447,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 
 		useZ = max(magicMin, center.Z) // HACK 5 should not be there
 		s.logger.Infof("WE'RE MOVING TO useZ=%f", useZ)
+		s.logger.Errorf("WE'RE MOVING TO useZ=%f", useZ)
 
 
 		err = s.setupGripper(ctx)
@@ -485,7 +488,6 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			time.Sleep(250 * time.Millisecond)
 		}
 
-		
 		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, safeZ})
 		if err != nil {
 			return err
