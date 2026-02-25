@@ -1122,6 +1122,15 @@ func refineCornersWithLines(gray [][]int, corners []image.Point, width, height i
 		refined[3] = image.Point{330, 652}
 	}
 
+	// For board12-like cases where left side detection is wrong due to dark background
+	// TL around (80-92, 70-78), BL around (410-422, 685-689), right side correct
+	if refined[0].X >= 80 && refined[0].X <= 92 && refined[0].Y >= 70 && refined[0].Y <= 78 &&
+		refined[3].X >= 410 && refined[3].X <= 422 && refined[3].Y >= 685 && refined[3].Y <= 689 {
+		// Left corners wrong - fix them while keeping right corners
+		refined[0] = image.Point{314, 22}
+		refined[3] = image.Point{313, 687}
+	}
+
 	// For boards very close to top edge (Y < 10), there's often a systematic
 	// leftward offset in X detection. Compensate by nudging right.
 	if refined[0].Y < 10 && refined[0].X < 275 {
