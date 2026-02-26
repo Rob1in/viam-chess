@@ -547,9 +547,8 @@ func (s *viamChessChess) Taunt(ctx context.Context, currentPos r3.Vector) error 
 		return err
 	}
 
-	lastIdx := len(joints) - 1
 	tauntJoint := 3
-	original := joints[lastIdx]
+	original := joints[tauntJoint]
 
 	joints[tauntJoint] = original - math.Pi/8
 	err = s.arm.MoveToJointPositions(ctx, joints, nil)
@@ -569,13 +568,7 @@ func (s *viamChessChess) Taunt(ctx context.Context, currentPos r3.Vector) error 
 		return err
 	}
 
-	joints[lastIdx] = original - math.Pi
-	err = s.arm.MoveToJointPositions(ctx, joints, nil)
-	if err != nil {
-		return err
-	}
-
-	joints[lastIdx] = original
+	joints[tauntJoint] = original
 	return s.arm.MoveToJointPositions(ctx, joints, nil)
 
 }
