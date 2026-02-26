@@ -994,7 +994,7 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	newPos := r3.Vector{X: camPos.X + 100, Y: camPos.Y, Z: camPos.Z}
 
 	orientation := &spatialmath.OrientationVector{
-		OX: boardCenter.X - newPos.X,
+		OX: boardCenter.X - camPos.X,
 		OY: boardCenter.Y - newPos.Y,
 		OZ: boardCenter.Z - newPos.Z,
 	}
