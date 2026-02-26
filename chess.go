@@ -270,7 +270,14 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		}
 	}()
 	var cmd cmdStruct
-	err := mapstructure.Decode(cmdMap, &cmd)
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		WeaklyTypedInput: true,
+		Result:           &cmd,
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = decoder.Decode(cmdMap)
 	if err != nil {
 		return nil, err
 	}
