@@ -542,21 +542,33 @@ func (s *viamChessChess) Taunt(ctx context.Context, currentPos r3.Vector) error 
 
 	s.logger.Infof("Taunting with captured piece at position %v", currentPos)
 
+	raised := r3.Vector{currentPos.X + 100, currentPos.Y, currentPos.Z + 100}
+	err := s.moveGripper(ctx, raised)
+	if err != nil {
+		return err
+	}
+
 	joints, err := s.arm.JointPositions(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	lastIdx := len(joints) - 1
-	original := joints[lastIdx]
+	jointIdx := 2 // third joint (0-indexed)
+	original := joints[jointIdx]
 
-	joints[lastIdx] = original - math.Pi
+	joints[jointIdx] = original + math.Pi/6
 	err = s.arm.MoveToJointPositions(ctx, joints, nil)
 	if err != nil {
 		return err
 	}
 
-	joints[lastIdx] = original
+	joints[jointIdx] = original - 2*math.Pi/6
+	err = s.arm.MoveToJointPositions(ctx, joints, nil)
+	if err != nil {
+		return err
+	}
+
+	joints[jointIdx] = original
 	return s.arm.MoveToJointPositions(ctx, joints, nil)
 }
 
