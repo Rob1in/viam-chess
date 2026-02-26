@@ -144,12 +144,23 @@ func computeSquareBounds(corners []image.Point, col, row int) image.Rectangle {
 	//fmt.Printf("colTopRight: %v\n", colTopRight)
 	//fmt.Printf("colBottomRight: %v\n", colBottomRight)
 
-	return image.Rect(
+	bounds := image.Rect(
 		scale(colTopLeft.X, colBottomLeft.X, float64(row)/8),
 		scale(colTopLeft.Y, colBottomLeft.Y, float64(row)/8),
 		scale(colTopRight.X, colBottomRight.X, float64(row+1)/8),
 		scale(colTopRight.Y, colBottomRight.Y, float64(row+1)/8),
 	)
+
+	// Add inset to avoid capturing border lines between squares
+	// and to account for depth/RGB alignment issues
+	// Shrink by 10 pixels on each side to stay well within the square
+	inset := 10
+	bounds.Min.X += inset
+	bounds.Min.Y += inset
+	bounds.Max.X -= inset
+	bounds.Max.Y -= inset
+
+	return bounds
 }
 
 func findBoardAndPieces(srcImg image.Image, pc pointcloud.PointCloud, props camera.Properties) ([]squareInfo, error) {
