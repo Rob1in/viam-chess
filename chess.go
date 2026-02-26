@@ -552,16 +552,17 @@ func (s *viamChessChess) Taunt(ctx context.Context, currentPos r3.Vector) error 
 	tauntJoint := 3
 	original := joints[tauntJoint]
 
-	joints[tauntJoint] = original - math.Pi/8
-	err = s.arm.MoveToJointPositions(ctx, joints, nil)
-	if err != nil {
-		return err
-	}
-
-	joints[tauntJoint] = original + math.Pi/8
-	err = s.arm.MoveToJointPositions(ctx, joints, nil)
-	if err != nil {
-		return err
+	for i := 0; i < 2; i++ {
+		joints[tauntJoint] = original - math.Pi/12
+		err = s.arm.MoveToJointPositions(ctx, joints, nil)
+		if err != nil {
+			return err
+		}
+		joints[tauntJoint] = original + math.Pi/12
+		err = s.arm.MoveToJointPositions(ctx, joints, nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	joints[tauntJoint] = original
