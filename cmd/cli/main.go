@@ -31,6 +31,8 @@ func realMain() error {
 	from := flag.String("from", "", "")
 	to := flag.String("to", "", "")
 	n := flag.Int("n", 1, "")
+	outputDir := flag.String("output-dir", "calibration-images", "directory to save calibration images")
+	numPictures := flag.Int("num-pictures", 2, "number of calibration pictures to take")
 
 	flag.Parse()
 
@@ -104,7 +106,18 @@ func realMain() error {
 		}
 		logger.Infof("res: %v", res)
 		return nil
-
+	case "calibrate":
+		res, err := thing.DoCommand(ctx, map[string]interface{}{
+			"calibrate": map[string]interface{}{
+				"num-pictures": *numPictures,
+				"output-dir":   *outputDir,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		logger.Infof("res: %v", res)
+		return nil
 	default:
 		return fmt.Errorf("unknown command [%s]", *cmd)
 	}

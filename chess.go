@@ -7,6 +7,7 @@ import (
 	"image"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/rimage"
 	"go.viam.com/rdk/robot/framesystem"
 	generic "go.viam.com/rdk/services/generic"
 	"go.viam.com/rdk/services/motion"
@@ -239,12 +241,18 @@ type MoveCmd struct {
 	N        int
 }
 
+type CalibrateCmd struct {
+	NumPictures int    `mapstructure:"num-pictures"`
+	OutputDir   string `mapstructure:"output-dir"`
+}
+
 type cmdStruct struct {
-	Move  MoveCmd
-	Go    int
-	Reset bool
-	Wipe  bool
-	Skill float64
+	Move      MoveCmd
+	Go        int
+	Reset     bool
+	Wipe      bool
+	Skill     float64
+	Calibrate CalibrateCmd
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -316,6 +324,10 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	if cmd.Skill > 0 {
 		s.skillAdjust = cmd.Skill
 		return nil, nil
+	}
+
+	if cmd.Calibrate.OutputDir != "" {
+		return nil, s.calibrateIntrinsics(ctx, cmd.Calibrate)
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
@@ -882,6 +894,111 @@ func (s *viamChessChess) resetBoard(ctx context.Context) error {
 
 func (s *viamChessChess) wipe(ctx context.Context) error {
 	return os.Remove(s.fenFile)
+}
+
+func (s *viamChessChess) captureAndSaveImage(ctx context.Context, outputPath string) error {
+	ni, _, err := s.cam.Images(ctx, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to capture image: %w", err)
+	}
+	if len(ni) == 0 {
+		return fmt.Errorf("camera returned no images")
+	}
+
+	img, err := ni[0].Image(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	if err := rimage.WriteImageToFile(outputPath, img); err != nil {
+		return fmt.Errorf("failed to write image to %s: %w", outputPath, err)
+	}
+	s.logger.Infof("saved calibration image to %s", outputPath)
+	return nil
+}
+
+func (s *viamChessChess) findBoardCenter(ctx context.Context) (r3.Vector, error) {
+	all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, nil)
+	if err != nil {
+		return r3.Vector{}, fmt.Errorf("failed to capture board: %w", err)
+	}
+
+	if len(all.Objects) == 0 {
+		return r3.Vector{}, fmt.Errorf("no objects found on board")
+	}
+
+	var sum r3.Vector
+	for _, o := range all.Objects {
+		md := o.MetaData()
+		c := md.Center()
+		sum.X += c.X
+		sum.Y += c.Y
+		sum.Z += c.Z
+	}
+	n := float64(len(all.Objects))
+	return r3.Vector{X: sum.X / n, Y: sum.Y / n, Z: sum.Z / n}, nil
+}
+
+func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateCmd) error {
+	ctx, span := trace.StartSpan(ctx, "calibrateIntrinsics")
+	defer span.End()
+
+	if s.cam == nil {
+		return fmt.Errorf("camera is not configured, cannot calibrate intrinsics")
+	}
+
+	if err := os.MkdirAll(cmd.OutputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory %s: %w", cmd.OutputDir, err)
+	}
+
+	// Take first picture from current (start) position
+	if err := s.captureAndSaveImage(ctx, filepath.Join(cmd.OutputDir, "calib_0.jpg")); err != nil {
+		return err
+	}
+
+	// Find the board center in world coordinates
+	boardCenter, err := s.findBoardCenter(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find board center: %w", err)
+	}
+	s.logger.Infof("board center: %v", boardCenter)
+
+	// Get current camera position in world frame
+	camPose, err := s.rfs.GetPose(ctx, s.conf.Camera, "world", nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get camera pose: %w", err)
+	}
+	camPos := camPose.Pose().Point()
+	s.logger.Infof("current camera position: %v", camPos)
+
+	// Compute new camera position: shift 10cm (100mm) in X
+	newPos := r3.Vector{X: camPos.X + 100, Y: camPos.Y, Z: camPos.Z}
+
+	// Compute orientation to point at the board center
+	orientation := &spatialmath.OrientationVector{
+		OX: newPos.X - boardCenter.X,
+		OY: newPos.Y - boardCenter.Y,
+		OZ: newPos.Z - boardCenter.Z,
+	}
+	s.logger.Infof("new camera position: %v, orientation: %v", newPos, orientation)
+
+	// Move camera to new position with computed orientation in a single call
+	newPose := spatialmath.NewPose(newPos, orientation)
+	_, err = s.motion.Move(ctx, motion.MoveReq{
+		ComponentName: s.conf.Camera,
+		Destination:   referenceframe.NewPoseInFrame("world", newPose),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to move camera: %w", err)
+	}
+
+	// Take second picture from the new position
+	if err := s.captureAndSaveImage(ctx, filepath.Join(cmd.OutputDir, "calib_1.jpg")); err != nil {
+		return err
+	}
+
+	s.logger.Infof("calibration complete: saved %d images to %s", 2, cmd.OutputDir)
+	return nil
 }
 
 func (s *viamChessChess) checkPositionForMoves(ctx context.Context, all viscapture.VisCapture) error {
