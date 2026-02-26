@@ -990,11 +990,11 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 		return fmt.Errorf("failed to move camera above board: %w", err)
 	}
 
-	// Compute new camera position: shift 10cm (100mm) in X
-	newPos := r3.Vector{X: camPos.X + 100, Y: camPos.Y, Z: camPos.Z}
+	// Compute new camera position: shift 5cm (50mm) in X
+	newPos := r3.Vector{X: camPos.X + 50, Y: camPos.Y, Z: camPos.Z}
 
 	orientation := &spatialmath.OrientationVector{
-		OX: boardCenter.X - camPos.X,
+		OX: boardCenter.X - newPos.X,
 		OY: boardCenter.Y - newPos.Y,
 		OZ: boardCenter.Z - newPos.Z,
 	}
