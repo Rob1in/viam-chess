@@ -613,7 +613,7 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 
 	orientation := &spatialmath.OrientationVectorDegrees{
 		OZ:    -1,
-		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta + 180,
+		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta,
 	}
 
 	if p.X > 300 {
