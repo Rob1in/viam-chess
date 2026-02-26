@@ -42,6 +42,7 @@ import (
 )
 
 var ChessModel = family.WithModel("chess")
+var numCaptured = 0
 
 const safeZ = 200.0
 
@@ -368,7 +369,7 @@ func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) 
 func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, theState *state) (r3.Vector, error) {
 	if pos == "-" {
 		if theState == nil {
-			return r3.Vector{400, -400, 200}, nil
+			return r3.Vector{400 + float64(numCaptured*100), -400, 200}, nil
 		}
 		return s.graveyardPosition(data, len(theState.graveyard))
 	}
@@ -428,6 +429,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 			if err != nil {
 				return fmt.Errorf("can't move piece out of the way: %w", err)
 			}
+			numCaptured++
 
 			if theState != nil {
 				pc := theState.game.Position().Board().Piece(m.S2())
