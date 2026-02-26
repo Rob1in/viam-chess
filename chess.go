@@ -993,17 +993,14 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	// Compute new camera position: shift 10cm (100mm) in X
 	newPos := r3.Vector{X: camPos.X + 100, Y: camPos.Y, Z: camPos.Z}
 
-	// Keep the same orientation as the current camera pose
-	// TODO: compute orientation to point at board center
-	// orientation := &spatialmath.OrientationVector{
-	// 	OX: newPos.X - boardCenter.X,
-	// 	OY: newPos.Y - boardCenter.Y,
-	// 	OZ: newPos.Z - boardCenter.Z,
-	// }
-	s.logger.Infof("new camera position: %v, keeping original orientation", newPos)
+	orientation := &spatialmath.OrientationVector{
+		OX: boardCenter.X - newPos.X,
+		OY: boardCenter.Y - newPos.Y,
+		OZ: boardCenter.Z - newPos.Z,
+	}
+	s.logger.Infof("new camera position: %v, orientation: %v", newPos, orientation)
 
-	// Move camera to new position, preserving the original orientation
-	newPose := spatialmath.NewPose(newPos, camPose.Pose().Orientation())
+	newPose := spatialmath.NewPose(newPos, orientation)
 	_, err = s.motion.Move(ctx, motion.MoveReq{
 		ComponentName: s.conf.Camera,
 		Destination:   referenceframe.NewPoseInFrame("world", newPose),
