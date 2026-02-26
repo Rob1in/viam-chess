@@ -453,7 +453,6 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		s.logger.Infof("WE'RE MOVING TO useZ=%f", useZ)
 		s.logger.Errorf("WE'RE MOVING TO useZ=%f", useZ)
 
-
 		err = s.setupGripper(ctx)
 		if err != nil {
 			return err
@@ -498,7 +497,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		}
 	}
 
-	if to == "-" {
+	if to == "-" || to[0] == 'X' {
 		if err := s.Taunt(ctx, r3.Vector{fromCenter.X, fromCenter.Y, safeZ}); err != nil {
 			s.logger.Warnf("taunt failed, continuing: %v", err)
 		}
@@ -507,7 +506,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	{
 		s.logger.Infof("THE STATE: %v", theState)
 		center, err := s.getCenterFor(data, to, theState)
-		
+
 		s.logger.Infof("CENTER for to: %v is %v", to, center)
 		if err != nil {
 			return err
@@ -612,7 +611,7 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 	s.logger.Errorf("ORIENTATION %v", orientation)
 	myPose := spatialmath.NewPose(p, orientation)
 	s.logger.Errorf("ORIGINAL POSE %v", myPose)
-        _, err := s.motion.Move(ctx, motion.MoveReq{
+	_, err := s.motion.Move(ctx, motion.MoveReq{
 		ComponentName: s.conf.Gripper,
 		Destination:   referenceframe.NewPoseInFrame("world", myPose),
 	})
