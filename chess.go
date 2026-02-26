@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -437,6 +438,7 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	}
 
 	useZ := 100.0
+	var fromCenter r3.Vector
 	s.logger.Infof("Okay doing a move with useZ=%f", useZ)
 
 	const magicMin = 12.0
@@ -445,11 +447,11 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		if err != nil {
 			return err
 		}
+		fromCenter = center
 
 		useZ = max(magicMin, center.Z) // HACK 5 should not be there
 		s.logger.Infof("WE'RE MOVING TO useZ=%f", useZ)
 		s.logger.Errorf("WE'RE MOVING TO useZ=%f", useZ)
-
 
 		err = s.setupGripper(ctx)
 		if err != nil {
@@ -495,10 +497,16 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		}
 	}
 
+	if to == "-" || to[0] == 'X' {
+		if err := s.Taunt(ctx, r3.Vector{fromCenter.X, fromCenter.Y, safeZ}); err != nil {
+			s.logger.Warnf("taunt failed, continuing: %v", err)
+		}
+	}
+
 	{
 		s.logger.Infof("THE STATE: %v", theState)
 		center, err := s.getCenterFor(data, to, theState)
-		
+
 		s.logger.Infof("CENTER for to: %v is %v", to, center)
 		if err != nil {
 			return err
@@ -526,6 +534,30 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	}
 
 	return nil
+}
+
+func (s *viamChessChess) Taunt(ctx context.Context, currentPos r3.Vector) error {
+	ctx, span := trace.StartSpan(ctx, "Taunt")
+	defer span.End()
+
+	s.logger.Infof("Taunting with captured piece at position %v", currentPos)
+
+	joints, err := s.arm.JointPositions(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	lastIdx := len(joints) - 1
+	original := joints[lastIdx]
+
+	joints[lastIdx] = original - math.Pi
+	err = s.arm.MoveToJointPositions(ctx, joints, nil)
+	if err != nil {
+		return err
+	}
+
+	joints[lastIdx] = original
+	return s.arm.MoveToJointPositions(ctx, joints, nil)
 }
 
 func (s *viamChessChess) goToStart(ctx context.Context) error {
@@ -579,7 +611,7 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 	s.logger.Errorf("ORIENTATION %v", orientation)
 	myPose := spatialmath.NewPose(p, orientation)
 	s.logger.Errorf("ORIGINAL POSE %v", myPose)
-        _, err := s.motion.Move(ctx, motion.MoveReq{
+	_, err := s.motion.Move(ctx, motion.MoveReq{
 		ComponentName: s.conf.Gripper,
 		Destination:   referenceframe.NewPoseInFrame("world", myPose),
 	})
