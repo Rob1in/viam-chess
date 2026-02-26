@@ -366,7 +366,7 @@ func (s *viamChessChess) graveyardPosition(data viscapture.VisCapture, pos int) 
 
 func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, theState *state) (r3.Vector, error) {
 	if pos == "-" {
-		if s == nil {
+		if theState == nil {
 			return r3.Vector{400, -400, 200}, nil
 		}
 		return s.graveyardPosition(data, len(theState.graveyard))
@@ -496,7 +496,10 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 	}
 
 	{
+		s.logger.Infof("THE STATE: %v", theState)
 		center, err := s.getCenterFor(data, to, theState)
+		
+		s.logger.Infof("CENTER for to: %v is %v", to, center)
 		if err != nil {
 			return err
 		}
@@ -562,7 +565,7 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 
 	orientation := &spatialmath.OrientationVectorDegrees{
 		OZ:    -1,
-		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta,
+		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta + 180,
 	}
 
 	if p.X > 300 {
@@ -573,9 +576,10 @@ func (s *viamChessChess) moveGripper(ctx context.Context, p r3.Vector) error {
 		orientation.OY = (p.Y + 300) / 300
 		orientation.OX += .2
 	}
-
+	s.logger.Errorf("ORIENTATION %v", orientation)
 	myPose := spatialmath.NewPose(p, orientation)
-	_, err := s.motion.Move(ctx, motion.MoveReq{
+	s.logger.Errorf("ORIGINAL POSE %v", myPose)
+        _, err := s.motion.Move(ctx, motion.MoveReq{
 		ComponentName: s.conf.Gripper,
 		Destination:   referenceframe.NewPoseInFrame("world", myPose),
 	})
