@@ -950,17 +950,19 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	ctx, span := trace.StartSpan(ctx, "calibrateIntrinsics")
 	defer span.End()
 
+	// Each entry is a displacement (dX, dY, dZ) from the original camera position.
+	// The first {0,0,0} takes a picture from the starting position with no movement.
+	displacements := []r3.Vector{
+		{X: 0, Y: 0, Z: 0},
+		{X: 20, Y: 0, Z: -20},
+	}
+
 	if s.cam == nil {
 		return fmt.Errorf("camera is not configured, cannot calibrate intrinsics")
 	}
 
 	if err := os.MkdirAll(cmd.OutputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", cmd.OutputDir, err)
-	}
-
-	// Take first picture from current (start) position
-	if err := s.captureAndSaveImage(ctx, filepath.Join(cmd.OutputDir, "calib_0.jpg")); err != nil {
-		return err
 	}
 
 	// Find the board center in world coordinates
@@ -976,47 +978,46 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 		return fmt.Errorf("failed to get camera pose: %w", err)
 	}
 	camPos := camPose.Pose().Point()
-	s.logger.Infof("current camera position: %v", camPos)
+	s.logger.Infof("original camera position: %v", camPos)
 
-	// Move camera 20cm (200mm) above the board center to test
-	aboveBoardPos := r3.Vector{X: boardCenter.X, Y: boardCenter.Y, Z: boardCenter.Z + 200}
-	aboveBoardPose := spatialmath.NewPose(aboveBoardPos, camPose.Pose().Orientation())
-	s.logger.Infof("moving camera above board center: %v", aboveBoardPos)
-	_, err = s.motion.Move(ctx, motion.MoveReq{
-		ComponentName: s.conf.Camera,
-		Destination:   referenceframe.NewPoseInFrame("world", aboveBoardPose),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to move camera above board: %w", err)
+	imgIdx := 0
+	for i, d := range displacements {
+		newPos := r3.Vector{X: camPos.X + d.X, Y: camPos.Y + d.Y, Z: camPos.Z + d.Z}
+
+		if d.X != 0 || d.Y != 0 || d.Z != 0 {
+			orientation := &spatialmath.OrientationVector{
+				OX: boardCenter.X - newPos.X,
+				OY: boardCenter.Y - newPos.Y,
+				OZ: boardCenter.Z - newPos.Z,
+			}
+			s.logger.Infof("displacement %d: moving to %v, orientation: %v", i, newPos, orientation)
+
+			newPose := spatialmath.NewPose(newPos, orientation)
+			_, err = s.motion.Move(ctx, motion.MoveReq{
+				ComponentName: s.conf.Camera,
+				Destination:   referenceframe.NewPoseInFrame("world", newPose),
+			})
+			if err != nil {
+				s.logger.Warnf("displacement %d: failed to move camera, skipping: %v", i, err)
+				continue
+			}
+		}
+
+		joints, err := s.arm.JointPositions(ctx, nil)
+		if err != nil {
+			s.logger.Warnf("displacement %d: failed to read joint positions: %v", i, err)
+		} else {
+			s.logger.Infof("displacement %d: joint positions: %v", i, joints)
+		}
+
+		imgPath := filepath.Join(cmd.OutputDir, fmt.Sprintf("calib_%d.jpg", imgIdx))
+		if err := s.captureAndSaveImage(ctx, imgPath); err != nil {
+			return err
+		}
+		imgIdx++
 	}
 
-	s.logger.Infof("camPos: %v", camPos)
-
-	// Compute new camera position: shift 5cm (50mm) in X
-	newPos := r3.Vector{X: camPos.X + 20, Y: camPos.Y, Z: camPos.Z - 20}
-
-	orientation := &spatialmath.OrientationVector{
-		OX: boardCenter.X - newPos.X,
-		OY: boardCenter.Y - newPos.Y,
-		OZ: boardCenter.Z - newPos.Z,
-	}
-	s.logger.Infof("new camera position: %v, orientation: %v", newPos, orientation)
-
-	newPose := spatialmath.NewPose(newPos, orientation)
-	_, err = s.motion.Move(ctx, motion.MoveReq{
-		ComponentName: s.conf.Camera,
-		Destination:   referenceframe.NewPoseInFrame("world", newPose),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to move camera: %w", err)
-	}
-
-	// Take second picture from the new position
-	if err := s.captureAndSaveImage(ctx, filepath.Join(cmd.OutputDir, "calib_1.jpg")); err != nil {
-		return err
-	}
-
-	s.logger.Infof("calibration complete: saved %d images to %s", 2, cmd.OutputDir)
+	s.logger.Infof("calibration complete: saved %d images to %s", len(displacements), cmd.OutputDir)
 	return nil
 }
 
