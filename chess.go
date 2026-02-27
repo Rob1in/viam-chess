@@ -436,10 +436,6 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 				theState.graveyard = append(theState.graveyard, int(pc))
 			}
 
-			err = s.goToStart(ctx)
-			if err != nil {
-				return fmt.Errorf("can't go home after graveyard move: %w", err)
-			}
 		}
 	}
 
