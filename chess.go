@@ -959,7 +959,7 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 		{X: 30, Y: 10, Z: -5},
 		{X: -30, Y: 40, Z: 10},
 		{X: 30, Y: -40, Z: 10},
-		{X: -20, Y: 40, Z: 50}
+		{X: -20, Y: 40, Z: 50},
 	}
 
 	if s.cam == nil {
