@@ -956,19 +956,19 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 		{X: 0, Y: 0, Z: 0},
 		{X: 20, Y: 0, Z: -10},
 		{X: -20, Y: 0, Z: -10},
-		{X: 30, Y: 10, Z: -5},
-		{X: -30, Y: 40, Z: 10},
-		{X: 30, Y: -40, Z: 10},
+		{X: 160, Y: 10, Z: -5},
+		{X: -230, Y: 140, Z: 10},
+		{X: 130, Y: -40, Z: 10},
 		{X: -20, Y: 40, Z: 50},
 		{X: -20, Y: 40, Z: -20},
-		{X: -20, Y: 40, Z: -30},
-		{X: 80, Y: 40, Z: -30},
-		{X: -80, Y: -40, Z: -30},
-		{X: -60, Y: -80, Z: -30},
+		{X: -20, Y: 140, Z: -30},
+		{X: 180, Y: 40, Z: -30},
+		{X: -80, Y: -240, Z: -30},
+		{X: -260, Y: -80, Z: -30},
 		{X: 60, Y: -40, Z: 10},
-		{X: -20, Y: -40, Z: 10},
+		{X: -20, Y: -240, Z: 10},
 		{X: 80, Y: 40, Z: 10},
-		{X: -20, Y: 80, Z: 10},
+		{X: -20, Y: 280, Z: 10},
 	}
 
 	if s.cam == nil {
@@ -1035,6 +1035,8 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 		} else {
 			s.logger.Infof("displacement %d: joint positions: %v", i, joints)
 		}
+
+		time.Sleep(time.Second)
 
 		imgPath := filepath.Join(cmd.OutputDir, fmt.Sprintf("calib_%d.jpg", imgIdx))
 		if err := s.captureAndSaveImage(ctx, imgPath); err != nil {
