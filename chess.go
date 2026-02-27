@@ -983,6 +983,18 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	camPos := camPose.Pose().Point()
 	s.logger.Infof("original camera position: %v", camPos)
 
+	// Move camera 20cm above the board center to verify board center detection
+	aboveBoardPos := r3.Vector{X: boardCenter.X, Y: boardCenter.Y, Z: boardCenter.Z + 200}
+	aboveBoardPose := spatialmath.NewPose(aboveBoardPos, camPose.Pose().Orientation())
+	s.logger.Infof("moving camera 20cm above board center: %v", aboveBoardPos)
+	_, err = s.motion.Move(ctx, motion.MoveReq{
+		ComponentName: s.conf.Camera,
+		Destination:   referenceframe.NewPoseInFrame("world", aboveBoardPose),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to move camera above board: %w", err)
+	}
+
 	imgIdx := 0
 	for i, d := range displacements {
 		newPos := r3.Vector{X: camPos.X + d.X, Y: camPos.Y + d.Y, Z: camPos.Z + d.Z}
