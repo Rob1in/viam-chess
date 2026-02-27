@@ -954,21 +954,16 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	// The first {0,0,0} takes a picture from the starting position with no movement.
 	displacements := []r3.Vector{
 		{X: 0, Y: 0, Z: 0},
-		{X: 200, Y: 0, Z: 0},
-		{X: -200, Y: 0, Z: 0},
-		{X: 0, Y: 150, Z: 0},
-		{X: 0, Y: -150, Z: 0},
+		{X: 200, Y: 200, Z: -20},
+		{X: -200, Y: 200, Z: -20},
+		{X: 200, Y: -200, Z: -20},
+		{X: -200, Y: -200, Z: -20},
 		{X: 160, Y: 100, Z: -10},
 		{X: -160, Y: 100, Z: -10},
 		{X: 160, Y: -100, Z: -10},
 		{X: -160, Y: -100, Z: -10},
 		{X: 100, Y: 0, Z: -30},
 		{X: -100, Y: 0, Z: -30},
-		{X: 0, Y: 100, Z: -30},
-		{X: 0, Y: -100, Z: -30},
-		{X: -230, Y: 140, Z: 10},
-		{X: -260, Y: -80, Z: -30},
-		{X: 160, Y: 10, Z: -5},
 	}
 
 	if s.cam == nil {
