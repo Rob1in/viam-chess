@@ -455,10 +455,17 @@ func (s *viamChessChess) movePiece(ctx context.Context, data viscapture.VisCaptu
 		s.logger.Infof("WE'RE MOVING TO useZ=%f", useZ)
 		s.logger.Errorf("WE'RE MOVING TO useZ=%f", useZ)
 
+		err = s.gripper.Open(ctx, nil)
+		if err != nil {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
+
 		err = s.setupGripper(ctx)
 		if err != nil {
 			return err
 		}
+		time.Sleep(500 * time.Millisecond)
 
 		err = s.moveGripper(ctx, r3.Vector{center.X, center.Y, safeZ})
 		if err != nil {
