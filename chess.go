@@ -238,14 +238,14 @@ type MoveCmd struct {
 }
 
 type cmdStruct struct {
-	Move      MoveCmd
-	Moves     []string
-	Go        int
-	PlayerGo  MoveCmd `mapstructure:"player_go"`
-	Reset     bool
-	Wipe      bool
-	Skill     float64
-	Hover     string
+	Move     MoveCmd
+	Moves    []string
+	Go       int
+	PlayerGo MoveCmd `mapstructure:"player_go"`
+	Reset    bool
+	Wipe     bool
+	Skill    float64
+	Hover    string
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -757,7 +757,7 @@ func (s *viamChessChess) moveGripperTilted(ctx context.Context, p r3.Vector) err
 	orientation := &spatialmath.OrientationVectorDegrees{
 		OZ:    -1,
 		OX:    -0.25,
-		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta + 180,
+		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta,
 	}
 
 	if p.X > 300 {
@@ -768,6 +768,7 @@ func (s *viamChessChess) moveGripperTilted(ctx context.Context, p r3.Vector) err
 		orientation.OY = (p.Y + 300) / 300
 		orientation.OX += .2
 	}
+	orientation.Theta += 180
 
 	myPose := spatialmath.NewPose(p, orientation)
 	_, err := s.motion.Move(ctx, motion.MoveReq{
