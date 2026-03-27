@@ -238,13 +238,14 @@ type MoveCmd struct {
 }
 
 type cmdStruct struct {
-	Move  MoveCmd
-	Moves []string
-	Go    int
-	Reset bool
-	Wipe  bool
-	Skill float64
-	Hover string
+	Move      MoveCmd
+	Moves     []string
+	Go        int
+	PlayerGo  MoveCmd `mapstructure:"player_go"`
+	Reset     bool
+	Wipe      bool
+	Skill     float64
+	Hover     string
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -340,14 +341,70 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return map[string]interface{}{"move": m.String()}, nil
 	}
 
-	if len(cmd.Moves) > 0 {
-		// Phase 1: validate all UCI moves against a simulated game state
-		// before touching the robot.
+	if cmd.PlayerGo.From != "" && cmd.PlayerGo.To != "" {
+		// Register the human's physical move (state update only, no arm movement),
+		// then have the engine respond physically.
 		theState, err := s.getGame(ctx)
 		if err != nil {
 			return nil, err
 		}
-		legalMoves := make([]*chess.Move, 0, len(cmd.Moves))
+
+		from := stringToSquare(cmd.PlayerGo.From)
+		to := stringToSquare(cmd.PlayerGo.To)
+		if from == chess.NoSquare || to == chess.NoSquare {
+			return nil, fmt.Errorf("player_go: invalid squares %q %q", cmd.PlayerGo.From, cmd.PlayerGo.To)
+		}
+
+		var playerMove *chess.Move
+		for _, candidate := range theState.game.ValidMoves() {
+			if candidate.S1() == from && candidate.S2() == to {
+				playerMove = &candidate
+				break
+			}
+		}
+		if playerMove == nil {
+			return nil, fmt.Errorf("player_go: illegal move %s%s", cmd.PlayerGo.From, cmd.PlayerGo.To)
+		}
+
+		if err = theState.game.Move(playerMove, nil); err != nil {
+			return nil, err
+		}
+		if err = s.saveGame(ctx, theState); err != nil {
+			return nil, err
+		}
+
+		robotMove, err := s.makeAMove(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]interface{}{
+			"player_move": playerMove.String(),
+			"robot_move":  robotMove.String(),
+		}, nil
+	}
+
+	if len(cmd.Moves) > 0 {
+		// Mirror go N exactly: one goToStart + one screenshot to cache all 64 square
+		// centers, then execute every move using those cached positions — no camera
+		// capture and no trip home between moves.
+		if s.cachedSquareXY == nil {
+			if err := s.goToStart(ctx); err != nil {
+				return nil, fmt.Errorf("moves: can't go home: %w", err)
+			}
+			if err := s.cacheSquarePositions(ctx); err != nil {
+				return nil, fmt.Errorf("moves: can't cache squares: %w", err)
+			}
+		}
+
+		theState, err := s.getGame(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		var emptyCapture viscapture.VisCapture
+		played := make([]string, 0, len(cmd.Moves))
+
 		for _, uciStr := range cmd.Moves {
 			if len(uciStr) < 4 {
 				return nil, fmt.Errorf("invalid UCI move %q", uciStr)
@@ -357,6 +414,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 			if from == chess.NoSquare || to == chess.NoSquare {
 				return nil, fmt.Errorf("invalid UCI move %q", uciStr)
 			}
+
 			var m *chess.Move
 			for _, candidate := range theState.game.ValidMoves() {
 				if candidate.S1() == from && candidate.S2() == to {
@@ -367,29 +425,23 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 			if m == nil {
 				return nil, fmt.Errorf("illegal move %q in current position", uciStr)
 			}
-			legalMoves = append(legalMoves, m)
-			// advance simulated state so the next move is validated against it
-			if err := theState.game.Move(m, nil); err != nil {
+
+			if err = s.movePiece(ctx, emptyCapture, theState, m.S1().String(), m.S2().String(), m); err != nil {
+				return nil, fmt.Errorf("batch move %q: %w", uciStr, err)
+			}
+			if err = theState.game.Move(m, nil); err != nil {
 				return nil, err
 			}
-		}
-
-		// Phase 2: execute physically — identical pattern to go N
-		played := make([]string, 0, len(cmd.Moves))
-		for i, m := range legalMoves {
-			if err := s.makePredeterminedMove(ctx, m); err != nil {
-				return nil, fmt.Errorf("batch move %q failed: %w", cmd.Moves[i], err)
+			if err = s.saveGame(ctx, theState); err != nil {
+				return nil, err
 			}
-			played = append(played, cmd.Moves[i])
+
+			played = append(played, uciStr)
 		}
 
-		finalState, err := s.getGame(ctx)
-		if err != nil {
-			return nil, err
-		}
 		return map[string]interface{}{
 			"moves": played,
-			"fen":   finalState.game.Position().String(),
+			"fen":   theState.game.Position().String(),
 		}, nil
 	}
 
@@ -905,85 +957,6 @@ func (s *viamChessChess) makeAMove(ctx context.Context, doSanityCheck bool) (*ch
 	}
 
 	return m, nil
-}
-
-// makePredeterminedMove executes a specific move physically, mirroring makeAMove
-// exactly but accepting the move as a parameter instead of asking the engine.
-// Called in a loop from the cmd.Moves handler — the arm never returns home between
-// calls because cacheSquarePositions is only run once (when cachedSquareXY is nil).
-func (s *viamChessChess) makePredeterminedMove(ctx context.Context, m *chess.Move) error {
-	ctx, span := trace.StartSpan(ctx, "makePredeterminedMove")
-	defer span.End()
-
-	if s.cachedSquareXY == nil {
-		err := s.goToStart(ctx)
-		if err != nil {
-			return fmt.Errorf("can't go home: %v", err)
-		}
-
-		err = s.cacheSquarePositions(ctx)
-		if err != nil {
-			return fmt.Errorf("can't cache square positions: %w", err)
-		}
-	}
-
-	theState, err := s.getGame(ctx)
-	if err != nil {
-		return err
-	}
-
-	var emptyCapture viscapture.VisCapture
-
-	if m.HasTag(chess.KingSideCastle) || m.HasTag(chess.QueenSideCastle) {
-		var f, t string
-		switch m.S1().String() {
-		case "e1":
-			switch m.S2().String() {
-			case "g1":
-				f = "h1"
-				t = "f1"
-			case "a1":
-				f = "a1"
-				t = "c1"
-			default:
-				return fmt.Errorf("bad castle? %v", m)
-			}
-		case "e8":
-			switch m.S2().String() {
-			case "g8":
-				f = "h8"
-				t = "f8"
-			case "a8":
-				f = "a8"
-				t = "c8"
-			default:
-				return fmt.Errorf("bad castle? %v", m)
-			}
-		default:
-			return fmt.Errorf("bad castle? %v", m)
-		}
-
-		err = s.movePiece(ctx, emptyCapture, nil, f, t, nil)
-		if err != nil {
-			return err
-		}
-	}
-
-	if m.HasTag(chess.EnPassant) {
-		return fmt.Errorf("can't handle enpassant")
-	}
-
-	err = s.movePiece(ctx, emptyCapture, theState, m.S1().String(), m.S2().String(), m)
-	if err != nil {
-		return err
-	}
-
-	err = theState.game.Move(m, nil)
-	if err != nil {
-		return err
-	}
-
-	return s.saveGame(ctx, theState)
 }
 
 func (s *viamChessChess) myGrab(ctx context.Context) (bool, error) {
