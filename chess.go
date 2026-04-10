@@ -1178,8 +1178,12 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 		pt := currentPose.Pose().Point()
 		q := currentPose.Pose().Orientation().Quaternion()
 
-		imgName := fmt.Sprintf("sfm_%d.jpg", i)
-		pcdName := fmt.Sprintf("sfm_%d.pcd", i)
+		prefix := cmd.Piece
+		if prefix == "" {
+			prefix = "sfm"
+		}
+		imgName := fmt.Sprintf("%s_%d.jpg", prefix, i)
+		pcdName := fmt.Sprintf("%s_%d.pcd", prefix, i)
 		imgPath := filepath.Join(cmd.OutputDir, imgName)
 		pcdPath := filepath.Join(cmd.OutputDir, pcdName)
 
