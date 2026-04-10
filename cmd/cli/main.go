@@ -118,6 +118,17 @@ func realMain() error {
 		}
 		logger.Infof("res: %v", res)
 		return nil
+	case "sfm":
+		res, err := thing.DoCommand(ctx, map[string]interface{}{
+			"sfm": map[string]interface{}{
+				"output-dir": *outputDir,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		logger.Infof("res: %v", res)
+		return nil
 	default:
 		return fmt.Errorf("unknown command [%s]", *cmd)
 	}

@@ -21,6 +21,7 @@ import (
 
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/camera"
+	"go.viam.com/rdk/pointcloud"
 	"go.viam.com/rdk/components/gripper"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
@@ -246,6 +247,26 @@ type CalibrateCmd struct {
 	OutputDir   string `mapstructure:"output-dir"`
 }
 
+type SfMCmd struct {
+	OutputDir string `mapstructure:"output-dir"`
+}
+
+type sfmPose struct {
+	XMM float64 `json:"x_mm"`
+	YMM float64 `json:"y_mm"`
+	ZMM float64 `json:"z_mm"`
+	QW  float64 `json:"qw"`
+	QX  float64 `json:"qx"`
+	QY  float64 `json:"qy"`
+	QZ  float64 `json:"qz"`
+}
+
+type sfmFrame struct {
+	Image string  `json:"image"`
+	PCD   string  `json:"pcd"`
+	Pose  sfmPose `json:"pose"`
+}
+
 type cmdStruct struct {
 	Move      MoveCmd
 	Go        int
@@ -253,6 +274,7 @@ type cmdStruct struct {
 	Wipe      bool
 	Skill     float64
 	Calibrate CalibrateCmd
+	SfM       SfMCmd `mapstructure:"sfm"`
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -269,6 +291,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 			s.logger.Warnf("can't go home: %v", err)
 		}
 	}()
+	s.logger.Infof("DoCommand received: %v", cmdMap)
 	var cmd cmdStruct
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		WeaklyTypedInput: true,
@@ -281,6 +304,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	if err != nil {
 		return nil, err
 	}
+	s.logger.Infof("DoCommand decoded: %+v", cmd)
 
 	if cmd.Move.To != "" && cmd.Move.From != "" {
 		s.logger.Infof("move %v to %v", cmd.Move.From, cmd.Move.To)
@@ -335,6 +359,10 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 
 	if cmd.Calibrate.OutputDir != "" {
 		return nil, s.calibrateIntrinsics(ctx, cmd.Calibrate)
+	}
+
+	if cmd.SfM.OutputDir != "" {
+		return nil, s.collectSfMData(ctx, cmd.SfM)
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
@@ -1041,6 +1069,138 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	}
 
 	s.logger.Infof("calibration complete: saved %d images to %s", len(displacements), cmd.OutputDir)
+	return nil
+}
+
+func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
+	ctx, span := trace.StartSpan(ctx, "collectSfMData")
+	defer span.End()
+
+	displacements := []r3.Vector{
+		{X: 0, Y: 0, Z: 0},
+		{X: 200, Y: 200, Z: -20},
+		{X: -200, Y: 200, Z: -20},
+		{X: 200, Y: -200, Z: -20},
+		{X: -200, Y: -200, Z: -20},
+		{X: 160, Y: 100, Z: -10},
+		{X: -160, Y: 100, Z: -10},
+		{X: 160, Y: -100, Z: -10},
+		{X: -160, Y: -100, Z: -10},
+		{X: 100, Y: 0, Z: -30},
+		{X: -100, Y: 0, Z: -30},
+	}
+
+	if s.cam == nil {
+		return fmt.Errorf("camera is not configured, cannot collect sfm data")
+	}
+
+	if err := os.MkdirAll(cmd.OutputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory %s: %w", cmd.OutputDir, err)
+	}
+
+	boardCenter, err := s.findBoardCenter(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find board center: %w", err)
+	}
+	s.logger.Infof("board center: %v", boardCenter)
+
+	camPose, err := s.rfs.GetPose(ctx, s.conf.Camera, "world", nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get camera pose: %w", err)
+	}
+	camPos := camPose.Pose().Point()
+
+	aboveBoardPos := r3.Vector{X: boardCenter.X, Y: boardCenter.Y, Z: boardCenter.Z + 200}
+	aboveBoardPose := spatialmath.NewPose(aboveBoardPos, camPose.Pose().Orientation())
+	_, err = s.motion.Move(ctx, motion.MoveReq{
+		ComponentName: s.conf.Camera,
+		Destination:   referenceframe.NewPoseInFrame("world", aboveBoardPose),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to move camera above board: %w", err)
+	}
+
+	var manifest []sfmFrame
+
+	for i, d := range displacements {
+		newPos := r3.Vector{X: camPos.X + d.X, Y: camPos.Y + d.Y, Z: camPos.Z + d.Z}
+
+		if d.X != 0 || d.Y != 0 || d.Z != 0 {
+			orientation := &spatialmath.OrientationVector{
+				OX: boardCenter.X - newPos.X,
+				OY: boardCenter.Y - newPos.Y,
+				OZ: boardCenter.Z - newPos.Z,
+			}
+			newPose := spatialmath.NewPose(newPos, orientation)
+			_, err = s.motion.Move(ctx, motion.MoveReq{
+				ComponentName: s.conf.Camera,
+				Destination:   referenceframe.NewPoseInFrame("world", newPose),
+			})
+			if err != nil {
+				s.logger.Warnf("sfm %d: failed to move camera, skipping: %v", i, err)
+				continue
+			}
+		}
+
+		currentPose, err := s.rfs.GetPose(ctx, s.conf.Camera, "world", nil, nil)
+		if err != nil {
+			s.logger.Warnf("sfm %d: failed to get camera pose, skipping: %v", i, err)
+			continue
+		}
+		pt := currentPose.Pose().Point()
+		q := currentPose.Pose().Orientation().Quaternion()
+
+		imgName := fmt.Sprintf("sfm_%d.jpg", i)
+		pcdName := fmt.Sprintf("sfm_%d.pcd", i)
+		imgPath := filepath.Join(cmd.OutputDir, imgName)
+		pcdPath := filepath.Join(cmd.OutputDir, pcdName)
+
+		if err := s.captureAndSaveImage(ctx, imgPath); err != nil {
+			s.logger.Warnf("sfm %d: failed to save image, skipping: %v", i, err)
+			continue
+		}
+
+		pc, err := s.cam.NextPointCloud(ctx, nil)
+		if err != nil {
+			s.logger.Warnf("sfm %d: failed to capture point cloud, skipping pcd: %v", i, err)
+		} else {
+			f, err := os.Create(pcdPath)
+			if err != nil {
+				s.logger.Warnf("sfm %d: failed to create pcd file, skipping pcd: %v", i, err)
+			} else {
+				if err := pointcloud.ToPCD(pc, f, pointcloud.PCDBinary); err != nil {
+					s.logger.Warnf("sfm %d: failed to write pcd file: %v", i, err)
+				}
+				f.Close()
+				s.logger.Infof("sfm %d: saved point cloud to %s", i, pcdPath)
+			}
+		}
+
+		manifest = append(manifest, sfmFrame{
+			Image: imgName,
+			PCD:   pcdName,
+			Pose: sfmPose{
+				XMM: pt.X,
+				YMM: pt.Y,
+				ZMM: pt.Z,
+				QW:  q.Real,
+				QX:  q.Imag,
+				QY:  q.Jmag,
+				QZ:  q.Kmag,
+			},
+		})
+	}
+
+	manifestPath := filepath.Join(cmd.OutputDir, "manifest.json")
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal manifest: %w", err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write manifest to %s: %w", manifestPath, err)
+	}
+
+	s.logger.Infof("sfm data collection complete: %d frames saved to %s", len(manifest), cmd.OutputDir)
 	return nil
 }
 
