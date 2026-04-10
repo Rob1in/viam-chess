@@ -274,7 +274,7 @@ type cmdStruct struct {
 	Wipe      bool
 	Skill     float64
 	Calibrate CalibrateCmd
-	SfM       SfMCmd `mapstructure:"sfm"`
+	SfM       bool   `mapstructure:"sfm"`
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -361,8 +361,12 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return nil, s.calibrateIntrinsics(ctx, cmd.Calibrate)
 	}
 
-	if cmd.SfM.OutputDir != "" {
-		return nil, s.collectSfMData(ctx, cmd.SfM)
+	if cmd.SfM {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			homeDir = "."
+		}
+		return nil, s.collectSfMData(ctx, SfMCmd{OutputDir: filepath.Join(homeDir, "sfm-data")})
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)

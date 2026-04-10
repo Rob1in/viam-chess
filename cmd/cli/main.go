@@ -120,9 +120,7 @@ func realMain() error {
 		return nil
 	case "sfm":
 		res, err := thing.DoCommand(ctx, map[string]interface{}{
-			"sfm": map[string]interface{}{
-				"output-dir": *outputDir,
-			},
+			"sfm": true,
 		})
 		if err != nil {
 			return err
