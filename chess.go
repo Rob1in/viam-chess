@@ -248,8 +248,11 @@ type CalibrateCmd struct {
 }
 
 type SfMCmd struct {
-	OutputDir string `mapstructure:"output-dir"`
-	Piece     string `mapstructure:"piece"`
+	OutputDir   string  `mapstructure:"output-dir"`
+	Piece       string  `mapstructure:"piece"`
+	Radius      float64 `mapstructure:"radius"`
+	NumRings    int     `mapstructure:"num-rings"`
+	NumAzimuths int     `mapstructure:"num-azimuths"`
 }
 
 type sfmPose struct {
@@ -1090,26 +1093,44 @@ func (s *viamChessChess) calibrateIntrinsics(ctx context.Context, cmd CalibrateC
 	return nil
 }
 
+// hemispherePoints returns world-frame positions on the upper hemisphere of radius r
+// centered at center. The first point is directly overhead (θ=0). Subsequent points
+// are arranged in numRings elevation rings up to 60° from vertical, with numAzimuths
+// evenly-spaced positions per ring.
+func hemispherePoints(center r3.Vector, radius float64, numRings, numAzimuths int) []r3.Vector {
+	const maxElevation = 60.0 * math.Pi / 180.0
+	points := []r3.Vector{
+		{X: center.X, Y: center.Y, Z: center.Z + radius},
+	}
+	for ring := 1; ring <= numRings; ring++ {
+		theta := float64(ring) / float64(numRings) * maxElevation
+		for az := 0; az < numAzimuths; az++ {
+			phi := float64(az) / float64(numAzimuths) * 2 * math.Pi
+			points = append(points, r3.Vector{
+				X: center.X + radius*math.Sin(theta)*math.Cos(phi),
+				Y: center.Y + radius*math.Sin(theta)*math.Sin(phi),
+				Z: center.Z + radius*math.Cos(theta),
+			})
+		}
+	}
+	return points
+}
+
 func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 	ctx, span := trace.StartSpan(ctx, "collectSfMData")
 	defer span.End()
 
-	displacements := []r3.Vector{
-		{X: 0, Y: 0, Z: 0},
-		{X: 200, Y: 200, Z: -20},
-		{X: -200, Y: 200, Z: -20},
-		{X: 200, Y: -200, Z: -20},
-		{X: -200, Y: -200, Z: -20},
-		{X: 160, Y: 100, Z: -10},
-		{X: -160, Y: 100, Z: -10},
-		{X: 160, Y: -100, Z: -10},
-		{X: -160, Y: -100, Z: -10},
-		{X: 100, Y: 0, Z: -30},
-		{X: -100, Y: 0, Z: -30},
-	}
-
 	if s.cam == nil {
 		return fmt.Errorf("camera is not configured, cannot collect sfm data")
+	}
+
+	numRings := cmd.NumRings
+	if numRings == 0 {
+		numRings = 3
+	}
+	numAzimuths := cmd.NumAzimuths
+	if numAzimuths == 0 {
+		numAzimuths = 8
 	}
 
 	cmd.OutputDir = filepath.Join(cmd.OutputDir, time.Now().Format("2006-01-02_15-04-05"))
@@ -1123,42 +1144,30 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 	}
 	s.logger.Infof("board center: %v", boardCenter)
 
-	camPose, err := s.rfs.GetPose(ctx, s.conf.Camera, "world", nil, nil)
-	if err != nil {
-		return fmt.Errorf("failed to get camera pose: %w", err)
-	}
-	camPos := camPose.Pose().Point()
-
-	aboveBoardPos := r3.Vector{X: boardCenter.X, Y: boardCenter.Y, Z: boardCenter.Z + 200}
-	aboveBoardPose := spatialmath.NewPose(aboveBoardPos, camPose.Pose().Orientation())
-	_, err = s.motion.Move(ctx, motion.MoveReq{
-		ComponentName: s.conf.Camera,
-		Destination:   referenceframe.NewPoseInFrame("world", aboveBoardPose),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to move camera above board: %w", err)
-	}
+	points := hemispherePoints(boardCenter, cmd.Radius, numRings, numAzimuths)
+	s.logger.Infof("sfm: %d hemisphere points, radius=%.0fmm, rings=%d, azimuths=%d", len(points), cmd.Radius, numRings, numAzimuths)
 
 	manifest := sfmManifest{Piece: cmd.Piece}
 
-	for i, d := range displacements {
-		newPos := r3.Vector{X: camPos.X + d.X, Y: camPos.Y + d.Y, Z: camPos.Z + d.Z}
+	for i, p := range points {
+		if p.Z < 200.0 {
+			s.logger.Warnf("sfm %d: skipping point %v — Z below 200mm safety limit", i, p)
+			continue
+		}
 
-		if d.X != 0 || d.Y != 0 || d.Z != 0 {
-			orientation := &spatialmath.OrientationVector{
-				OX: boardCenter.X - newPos.X,
-				OY: boardCenter.Y - newPos.Y,
-				OZ: boardCenter.Z - newPos.Z,
-			}
-			newPose := spatialmath.NewPose(newPos, orientation)
-			_, err = s.motion.Move(ctx, motion.MoveReq{
-				ComponentName: s.conf.Camera,
-				Destination:   referenceframe.NewPoseInFrame("world", newPose),
-			})
-			if err != nil {
-				s.logger.Warnf("sfm %d: failed to move camera, skipping: %v", i, err)
-				continue
-			}
+		orientation := &spatialmath.OrientationVector{
+			OX: boardCenter.X - p.X,
+			OY: boardCenter.Y - p.Y,
+			OZ: boardCenter.Z - p.Z,
+		}
+		newPose := spatialmath.NewPose(p, orientation)
+		_, err = s.motion.Move(ctx, motion.MoveReq{
+			ComponentName: s.conf.Camera,
+			Destination:   referenceframe.NewPoseInFrame("world", newPose),
+		})
+		if err != nil {
+			s.logger.Warnf("sfm %d: failed to move camera to %v, skipping: %v", i, p, err)
+			continue
 		}
 
 		currentPose, err := s.rfs.GetPose(ctx, s.conf.Camera, "world", nil, nil)

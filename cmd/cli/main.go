@@ -34,6 +34,9 @@ func realMain() error {
 	outputDir := flag.String("output-dir", "", "directory to save images")
 	numPictures := flag.Int("num-pictures", 2, "number of calibration pictures to take")
 	piece := flag.String("piece", "", "name of the piece being photographed (for sfm)")
+	radius := flag.Float64("radius", 300, "hemisphere radius in mm (for sfm)")
+	numRings := flag.Int("num-rings", 3, "number of elevation rings (for sfm)")
+	numAzimuths := flag.Int("num-azimuths", 8, "number of azimuth shots per ring (for sfm)")
 
 	flag.Parse()
 
@@ -120,7 +123,11 @@ func realMain() error {
 		logger.Infof("res: %v", res)
 		return nil
 	case "sfm":
-		sfmCmd := map[string]interface{}{}
+		sfmCmd := map[string]interface{}{
+			"radius":       *radius,
+			"num-rings":    *numRings,
+			"num-azimuths": *numAzimuths,
+		}
 		if *outputDir != "" {
 			sfmCmd["output-dir"] = *outputDir
 		}
