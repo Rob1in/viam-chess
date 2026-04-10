@@ -31,8 +31,9 @@ func realMain() error {
 	from := flag.String("from", "", "")
 	to := flag.String("to", "", "")
 	n := flag.Int("n", 1, "")
-	outputDir := flag.String("output-dir", "calibration-images", "directory to save calibration images")
+	outputDir := flag.String("output-dir", "", "directory to save images")
 	numPictures := flag.Int("num-pictures", 2, "number of calibration pictures to take")
+	piece := flag.String("piece", "", "name of the piece being photographed (for sfm)")
 
 	flag.Parse()
 
@@ -119,8 +120,15 @@ func realMain() error {
 		logger.Infof("res: %v", res)
 		return nil
 	case "sfm":
+		sfmCmd := map[string]interface{}{}
+		if *outputDir != "" {
+			sfmCmd["output-dir"] = *outputDir
+		}
+		if *piece != "" {
+			sfmCmd["piece"] = *piece
+		}
 		res, err := thing.DoCommand(ctx, map[string]interface{}{
-			"sfm": true,
+			"sfm": sfmCmd,
 		})
 		if err != nil {
 			return err

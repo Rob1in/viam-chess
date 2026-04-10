@@ -249,6 +249,7 @@ type CalibrateCmd struct {
 
 type SfMCmd struct {
 	OutputDir string `mapstructure:"output-dir"`
+	Piece     string `mapstructure:"piece"`
 }
 
 type sfmPose struct {
@@ -267,6 +268,11 @@ type sfmFrame struct {
 	Pose  sfmPose `json:"pose"`
 }
 
+type sfmManifest struct {
+	Piece  string     `json:"piece"`
+	Frames []sfmFrame `json:"frames"`
+}
+
 type cmdStruct struct {
 	Move      MoveCmd
 	Go        int
@@ -274,7 +280,7 @@ type cmdStruct struct {
 	Wipe      bool
 	Skill     float64
 	Calibrate CalibrateCmd
-	SfM       bool   `mapstructure:"sfm"`
+	SfM       SfMCmd `mapstructure:"sfm"`
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -292,6 +298,11 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		}
 	}()
 	s.logger.Infof("DoCommand received: %v", cmdMap)
+	if v, ok := cmdMap["sfm"]; ok {
+		if b, isBool := v.(bool); isBool && b {
+			cmdMap["sfm"] = map[string]interface{}{}
+		}
+	}
 	var cmd cmdStruct
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		WeaklyTypedInput: true,
@@ -361,12 +372,15 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return nil, s.calibrateIntrinsics(ctx, cmd.Calibrate)
 	}
 
-	if cmd.SfM {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			homeDir = "."
+	if _, ok := cmdMap["sfm"]; ok {
+		if cmd.SfM.OutputDir == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				homeDir = "."
+			}
+			cmd.SfM.OutputDir = filepath.Join(homeDir, "sfm-data")
 		}
-		return nil, s.collectSfMData(ctx, SfMCmd{OutputDir: filepath.Join(homeDir, "sfm-data")})
+		return nil, s.collectSfMData(ctx, cmd.SfM)
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
@@ -1098,6 +1112,7 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 		return fmt.Errorf("camera is not configured, cannot collect sfm data")
 	}
 
+	cmd.OutputDir = filepath.Join(cmd.OutputDir, time.Now().Format("2006-01-02_15-04-05"))
 	if err := os.MkdirAll(cmd.OutputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", cmd.OutputDir, err)
 	}
@@ -1124,7 +1139,7 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 		return fmt.Errorf("failed to move camera above board: %w", err)
 	}
 
-	var manifest []sfmFrame
+	manifest := sfmManifest{Piece: cmd.Piece}
 
 	for i, d := range displacements {
 		newPos := r3.Vector{X: camPos.X + d.X, Y: camPos.Y + d.Y, Z: camPos.Z + d.Z}
@@ -1180,7 +1195,7 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 			}
 		}
 
-		manifest = append(manifest, sfmFrame{
+		manifest.Frames = append(manifest.Frames, sfmFrame{
 			Image: imgName,
 			PCD:   pcdName,
 			Pose: sfmPose{
@@ -1204,7 +1219,7 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 		return fmt.Errorf("failed to write manifest to %s: %w", manifestPath, err)
 	}
 
-	s.logger.Infof("sfm data collection complete: %d frames saved to %s", len(manifest), cmd.OutputDir)
+	s.logger.Infof("sfm data collection complete: piece=%q %d frames saved to %s", cmd.Piece, len(manifest.Frames), cmd.OutputDir)
 	return nil
 }
 
