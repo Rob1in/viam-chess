@@ -303,7 +303,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	s.logger.Infof("DoCommand received: %v", cmdMap)
 	if v, ok := cmdMap["sfm"]; ok {
 		if b, isBool := v.(bool); isBool && b {
-			cmdMap["sfm"] = map[string]interface{}{}
+			cmdMap["sfm"] = map[string]interface{}{"radius": float64(300)}
 		}
 	}
 	var cmd cmdStruct
@@ -375,7 +375,7 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return nil, s.calibrateIntrinsics(ctx, cmd.Calibrate)
 	}
 
-	if _, ok := cmdMap["sfm"]; ok {
+	if cmd.SfM.Radius > 0 {
 		if cmd.SfM.OutputDir == "" {
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
