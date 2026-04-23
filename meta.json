@@ -7,13 +7,13 @@
   "models": [
     {
       "api": "rdk:service:generic",
-      "model": "erh:viam-chess:chess",
+      "model": "viam-labs:hackathon-chess:chess",
       "short_description": "Provide a short (100 characters or less) description of this model here",
       "markdown_link": "README.md#chess-config"
     },
     {
       "api": "rdk:service:vision",
-      "model": "erh:viam-chess:piece-finder",
+      "model": "viam-labs:hackathon-chess:piece-finder",
       "short_description": "debugging tool mostly i think",
       "markdown_link": "README.md#piece-finder-config"
     }
