@@ -1166,23 +1166,37 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 	manifest := sfmManifest{Piece: cmd.Piece}
 
 	for i, p := range points {
-		if p.Z < 200.0 {
-			s.logger.Warnf("sfm %d: skipping point %v — Z below 200mm safety limit", i, p)
-			continue
+		pos := p
+		var moved bool
+		for attempt := 0; attempt < 4; attempt++ {
+			if pos.Z < 200.0 {
+				s.logger.Warnf("sfm %d: Z=%.1f below 200mm safety, skipping", i, pos.Z)
+				break
+			}
+			orientation := &spatialmath.OrientationVector{
+				OX: boardCenter.X - pos.X,
+				OY: boardCenter.Y - pos.Y,
+				OZ: boardCenter.Z - pos.Z,
+			}
+			newPose := spatialmath.NewPose(pos, orientation)
+			_, err = s.motion.Move(ctx, motion.MoveReq{
+				ComponentName: s.conf.Camera,
+				Destination:   referenceframe.NewPoseInFrame("world", newPose),
+			})
+			if err == nil {
+				moved = true
+				break
+			}
+			nextRadius := pos.Sub(boardCenter).Norm() * 0.8
+			if nextRadius < 100.0 {
+				s.logger.Warnf("sfm %d: gave up after %d attempts, next radius %.1f below 100mm floor", i, attempt+1, nextRadius)
+				break
+			}
+			s.logger.Warnf("sfm %d attempt %d failed (%v), retrying at radius %.1f", i, attempt+1, err, nextRadius)
+			offset := pos.Sub(boardCenter).Mul(0.8)
+			pos = boardCenter.Add(offset)
 		}
-
-		orientation := &spatialmath.OrientationVector{
-			OX: boardCenter.X - p.X,
-			OY: boardCenter.Y - p.Y,
-			OZ: boardCenter.Z - p.Z,
-		}
-		newPose := spatialmath.NewPose(p, orientation)
-		_, err = s.motion.Move(ctx, motion.MoveReq{
-			ComponentName: s.conf.Camera,
-			Destination:   referenceframe.NewPoseInFrame("world", newPose),
-		})
-		if err != nil {
-			s.logger.Warnf("sfm %d: failed to move camera to %v, skipping: %v", i, p, err)
+		if !moved {
 			continue
 		}
 
