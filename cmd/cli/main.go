@@ -37,6 +37,7 @@ func realMain() error {
 	radius := flag.Float64("radius", 300, "hemisphere radius in mm (for sfm)")
 	numRings := flag.Int("num-rings", 3, "number of elevation rings (for sfm)")
 	numAzimuths := flag.Int("num-azimuths", 8, "number of azimuth shots per ring (for sfm)")
+	camera := flag.String("camera", "cam", "camera resource name on the machine")
 
 	flag.Parse()
 
@@ -57,7 +58,7 @@ func realMain() error {
 		Arm:         "arm",
 		Gripper:     "gripper",
 		PoseStart:   "hack-pose-look-straight-down",
-		Camera:      "cam",
+		Camera:      *camera,
 		CaptureDir:  "captured-data",
 	}
 	_, _, err := cfg.Validate("")
