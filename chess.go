@@ -283,7 +283,6 @@ type cmdStruct struct {
 	Wipe      bool
 	Skill     float64
 	Calibrate CalibrateCmd
-	SfM       SfMCmd `mapstructure:"sfm"`
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -301,11 +300,39 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		}
 	}()
 	s.logger.Infof("DoCommand received: %v", cmdMap)
-	if v, ok := cmdMap["sfm"]; ok {
-		if b, isBool := v.(bool); isBool && b {
-			cmdMap["sfm"] = map[string]interface{}{"radius": float64(300)}
+
+	if sfmRaw, ok := cmdMap["sfm"]; ok {
+		var sfmCmd SfMCmd
+		switch v := sfmRaw.(type) {
+		case bool:
+			if v {
+				sfmCmd.Radius = 300
+			}
+		case map[string]interface{}:
+			sfmDecoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+				WeaklyTypedInput: true,
+				Result:           &sfmCmd,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if err := sfmDecoder.Decode(v); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("sfm command value must be a map or bool, got %T", sfmRaw)
 		}
+		s.logger.Infof("sfm command decoded: %+v", sfmCmd)
+		if sfmCmd.OutputDir == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				homeDir = "."
+			}
+			sfmCmd.OutputDir = filepath.Join(homeDir, "sfm-data")
+		}
+		return nil, s.collectSfMData(ctx, sfmCmd)
 	}
+
 	var cmd cmdStruct
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		WeaklyTypedInput: true,
@@ -373,17 +400,6 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 
 	if cmd.Calibrate.OutputDir != "" {
 		return nil, s.calibrateIntrinsics(ctx, cmd.Calibrate)
-	}
-
-	if cmd.SfM.Radius > 0 {
-		if cmd.SfM.OutputDir == "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				homeDir = "."
-			}
-			cmd.SfM.OutputDir = filepath.Join(homeDir, "sfm-data")
-		}
-		return nil, s.collectSfMData(ctx, cmd.SfM)
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
