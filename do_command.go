@@ -15,6 +15,10 @@ import (
 type MoveCmd struct {
 	From, To string
 	N        int
+	// Tall forces grabZTall pickup height — set when the caller knows the
+	// source piece is a King or Queen but can't pass a chess.Board (e.g.,
+	// scripted moves outside the engine).
+	Tall bool
 }
 
 type cmdStruct struct {
@@ -167,7 +171,11 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 				return nil, err
 			}
 
-			err = s.movePiece(ctx, all, nil, from, to, nil, nil)
+			pickupZ := 0.0
+			if cmd.Move.Tall {
+				pickupZ = s.conf.grabZTall()
+			}
+			err = s.movePieceWithPickupZ(ctx, all, nil, from, to, nil, nil, pickupZ)
 			if err != nil {
 				return nil, err
 			}
