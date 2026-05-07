@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-rings", type=int, default=5, help="number of elevation rings")
     p.add_argument("--num-azimuths", type=int, default=4, help="azimuth shots per ring")
     p.add_argument("--output-dir", default="/home/viam/robin/chess-dataset", help="output dir on the machine")
+    p.add_argument("--skip-pcd", action="store_true", help="skip saving point clouds")
     return p.parse_args()
 
 
@@ -48,6 +49,7 @@ async def main(args: argparse.Namespace) -> None:
             "num-rings": args.num_rings,
             "num-azimuths": args.num_azimuths,
             "output-dir": args.output_dir,
+            "skip-pcd": args.skip_pcd,
         }})
         print("result:", result)
     finally:

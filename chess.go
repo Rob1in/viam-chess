@@ -253,6 +253,7 @@ type SfMCmd struct {
 	Radius      float64 `mapstructure:"radius"`
 	NumRings    int     `mapstructure:"num-rings"`
 	NumAzimuths int     `mapstructure:"num-azimuths"`
+	SkipPCD     bool    `mapstructure:"skip-pcd"`
 }
 
 type sfmPose struct {
@@ -1212,29 +1213,37 @@ func (s *viamChessChess) collectSfMData(ctx context.Context, cmd SfMCmd) error {
 		if prefix == "" {
 			prefix = "sfm"
 		}
-		imgName := fmt.Sprintf("%s_%d.jpg", prefix, i)
-		pcdName := fmt.Sprintf("%s_%d.pcd", prefix, i)
+		imgName := fmt.Sprintf("%s_%d.png", prefix, i)
 		imgPath := filepath.Join(cmd.OutputDir, imgName)
-		pcdPath := filepath.Join(cmd.OutputDir, pcdName)
 
 		if err := s.captureAndSaveImage(ctx, imgPath); err != nil {
 			s.logger.Warnf("sfm %d: failed to save image, skipping: %v", i, err)
 			continue
 		}
 
-		pc, err := s.cam.NextPointCloud(ctx, nil)
-		if err != nil {
-			s.logger.Warnf("sfm %d: failed to capture point cloud, skipping pcd: %v", i, err)
-		} else {
-			f, err := os.Create(pcdPath)
+		pcdName := ""
+		if !cmd.SkipPCD {
+			pcdName = fmt.Sprintf("%s_%d.pcd", prefix, i)
+			pcdPath := filepath.Join(cmd.OutputDir, pcdName)
+			pc, err := s.cam.NextPointCloud(ctx, nil)
 			if err != nil {
-				s.logger.Warnf("sfm %d: failed to create pcd file, skipping pcd: %v", i, err)
+				s.logger.Warnf("sfm %d: failed to capture point cloud, skipping pcd: %v", i, err)
+				pcdName = ""
 			} else {
-				if err := pointcloud.ToPCD(pc, f, pointcloud.PCDBinary); err != nil {
-					s.logger.Warnf("sfm %d: failed to write pcd file: %v", i, err)
+				f, err := os.Create(pcdPath)
+				if err != nil {
+					s.logger.Warnf("sfm %d: failed to create pcd file, skipping pcd: %v", i, err)
+					pcdName = ""
+				} else {
+					if err := pointcloud.ToPCD(pc, f, pointcloud.PCDBinary); err != nil {
+						s.logger.Warnf("sfm %d: failed to write pcd file: %v", i, err)
+						pcdName = ""
+					}
+					f.Close()
+					if pcdName != "" {
+						s.logger.Infof("sfm %d: saved point cloud to %s", i, pcdPath)
+					}
 				}
-				f.Close()
-				s.logger.Infof("sfm %d: saved point cloud to %s", i, pcdPath)
 			}
 		}
 

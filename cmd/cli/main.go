@@ -37,6 +37,7 @@ func realMain() error {
 	radius := flag.Float64("radius", 300, "hemisphere radius in mm (for sfm)")
 	numRings := flag.Int("num-rings", 3, "number of elevation rings (for sfm)")
 	numAzimuths := flag.Int("num-azimuths", 8, "number of azimuth shots per ring (for sfm)")
+	skipPCD := flag.Bool("skip-pcd", false, "skip saving point clouds (for sfm)")
 	camera := flag.String("camera", "cam", "camera resource name on the machine")
 
 	flag.Parse()
@@ -128,6 +129,7 @@ func realMain() error {
 			"radius":       *radius,
 			"num-rings":    *numRings,
 			"num-azimuths": *numAzimuths,
+			"skip-pcd":     *skipPCD,
 		}
 		if *outputDir != "" {
 			sfmCmd["output-dir"] = *outputDir
