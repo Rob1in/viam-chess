@@ -8,6 +8,7 @@ import (
 	"image/draw"
 	"math"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/golang/geo/r3"
@@ -31,8 +32,6 @@ import (
 	"go.viam.com/rdk/vision/objectdetection"
 	"go.viam.com/rdk/vision/viscapture"
 	"go.viam.com/utils/trace"
-
-	"github.com/erh/vmodutils/touch"
 )
 
 var PieceFinderModel = family.WithModel("piece-finder")
@@ -1055,20 +1054,43 @@ func (bc *PieceFinder) CaptureAllFromCamera(ctx context.Context, cameraName stri
 	return ret, nil
 }
 
+// pickupTopN is the number of highest-Z piece points whose centroid drives the
+// gripper XY for occupied squares. Smaller N → grab biased toward the very tip
+// (noisy on knights, leaning pieces); larger N → biased toward the piece body
+// (better for flat tops, worse for tall narrow tops).
+const pickupTopN = 5
+
 func GetPickupCenter(o *viz.Object) r3.Vector {
-	md := o.MetaData()
-	center := md.Center()
-
 	if strings.HasSuffix(o.Geometry.Label(), "-0") {
-		return center
+		md := o.MetaData()
+		return md.Center()
 	}
+	return topNHighestCentroid(o, pickupTopN)
+}
 
-	high := touch.PCFindHighestInRegion(o, image.Rect(-1000, -1000, 1000, 1000))
-	return r3.Vector{
-		X: (center.X + high.X) / 2,
-		Y: (center.Y + high.Y) / 2,
-		Z: high.Z,
+// topNHighestCentroid returns the centroid of the n highest-Z points in pc.
+// If pc has fewer than n points, the centroid is taken over whatever exists.
+func topNHighestCentroid(pc pointcloud.PointCloud, n int) r3.Vector {
+	pts := make([]r3.Vector, 0, 256)
+	pc.Iterate(0, 0, func(p r3.Vector, _ pointcloud.Data) bool {
+		pts = append(pts, p)
+		return true
+	})
+	if len(pts) == 0 {
+		return r3.Vector{}
 	}
+	sort.Slice(pts, func(i, j int) bool { return pts[i].Z > pts[j].Z })
+	if len(pts) > n {
+		pts = pts[:n]
+	}
+	var sum r3.Vector
+	for _, v := range pts {
+		sum.X += v.X
+		sum.Y += v.Y
+		sum.Z += v.Z
+	}
+	inv := 1.0 / float64(len(pts))
+	return r3.Vector{X: sum.X * inv, Y: sum.Y * inv, Z: sum.Z * inv}
 }
 
 func (bc *PieceFinder) GetProperties(ctx context.Context, extra map[string]interface{}) (*vision.Properties, error) {
