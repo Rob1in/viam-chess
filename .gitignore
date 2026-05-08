@@ -49,3 +49,6 @@ viamapp/vite.config.js
 # Claude Code
 .claude/worktrees
 .claude/settings.local.json
+
+# Secrets
+.env
