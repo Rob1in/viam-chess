@@ -78,9 +78,9 @@ class Config:
     perturb_z_mm: float = 8.0
     perturb_theta_deg: float = 3.0
     upload_concurrency: int = 10
-    upload_every_n_moves: int = 5  # drain the frame buffer every N moves
+    upload_every_n_moves: int = 3  # drain the frame buffer every N moves
     manual: bool = False  # prompt to move pieces by hand instead of using the robot
-    seed: int | None = None  # None → fresh OS-entropy seed each run, logged for reproducibility
+    wipe_on_start: bool = True  # start from clean game_state (default)
 
 
 @dataclass
@@ -133,6 +133,93 @@ async def do_move(chess_svc: GenericService, src: str, dst: str, tall: bool) -> 
     await chess_svc.do_command({
         "move": {"from": src, "to": dst, "n": 1, "tall": tall},
     })
+
+
+def uci_move_to_src_dst(move: str) -> tuple[str, str]:
+    """Parse UCI move like 'e2e4' (or 'e7e8q') to (src, dst)."""
+    move = move.strip()
+    if len(move) < 4:
+        raise ValueError(f"bad move {move!r}")
+    src, dst = move[:2], move[2:4]
+    if src[0] not in FILES or src[1] not in RANKS or dst[0] not in FILES or dst[1] not in RANKS:
+        raise ValueError(f"bad move {move!r}")
+    return src, dst
+
+
+def board_from_fen(fen: str) -> dict[str, str]:
+    """Convert FEN into this script's {square: 'white-pawn'|...} board dict."""
+    placement = fen.split()[0]
+    ranks = placement.split("/")
+    if len(ranks) != 8:
+        raise ValueError(f"bad fen placement {placement!r}")
+
+    piece_name = {
+        "p": "pawn",
+        "n": "knight",
+        "b": "bishop",
+        "r": "rook",
+        "q": "queen",
+        "k": "king",
+    }
+    out: dict[str, str] = {}
+    for rank_idx, r in enumerate(ranks):
+        file_idx = 0
+        for ch in r:
+            if ch.isdigit():
+                file_idx += int(ch)
+                continue
+            if file_idx >= 8:
+                raise ValueError(f"bad fen rank {r!r} in {placement!r}")
+            color = "white" if ch.isupper() else "black"
+            p = piece_name.get(ch.lower())
+            if not p:
+                raise ValueError(f"bad fen piece {ch!r} in {placement!r}")
+            sq = f"{FILES[file_idx]}{8 - rank_idx}"
+            out[sq] = f"{color}-{p}"
+            file_idx += 1
+        if file_idx != 8:
+            raise ValueError(f"bad fen rank {r!r} in {placement!r}")
+    return out
+
+
+async def get_board_snapshot(chess_svc: GenericService) -> dict:
+    """Fetch the chess module's snapshot (includes `fen`)."""
+    res = await chess_svc.do_command({"board-snapshot": True})
+    if not isinstance(res, dict) or "fen" not in res:
+        raise RuntimeError(f"unexpected board-snapshot response: {res!r}")
+    return res
+
+
+async def do_go(chess_svc: GenericService, n: int = 1) -> tuple[str, str]:
+    """Ask the chess service to play `n` moves. Returns (src, dst) of the last move."""
+    res = await chess_svc.do_command({"go": n})
+    move = res.get("move") if isinstance(res, dict) else None
+    if not isinstance(move, str):
+        raise RuntimeError(f"unexpected go response: {res!r}")
+    return uci_move_to_src_dst(move)
+
+
+async def do_go_retry(chess_svc: GenericService, n: int = 1, attempts: int = 5) -> tuple[str, str]:
+    """Run `go` with a few retries for occasional vision noise at sanity-check time."""
+    last_err: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await do_go(chess_svc, n)
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            retryable = "no valid moves from:" in msg or "can't find object for square" in msg
+            if not retryable or attempt == attempts:
+                raise
+            # Clear square cache and try again after a short pause.
+            try:
+                await chess_svc.do_command({"clear-cache": True})
+            except Exception:
+                # If cache-clear itself fails, we still retry `go` after sleep.
+                pass
+            await asyncio.sleep(0.4 * attempt)
+    assert last_err is not None
+    raise last_err
 
 
 def perturb_pose(home: Pose, rng: random.Random, cfg: Config) -> Pose:
@@ -248,10 +335,7 @@ async def upload_batch(
 # ---------------------------------------------------------------------------
 
 async def run(cfg: Config, log: logging.Logger) -> None:
-    seed = cfg.seed if cfg.seed is not None else random.SystemRandom().randrange(2**31)
-    log.info("rng seed: %d", seed)
-    rng = random.Random(seed)
-    board = starting_board()
+    rng = random.Random()
     frames: list[CapturedFrame] = []
 
     machine = await connect_machine(cfg)
@@ -270,26 +354,28 @@ async def run(cfg: Config, log: logging.Logger) -> None:
         log.info("homing arm via switch %r", cfg.home_switch)
         await go_home(home_switch)
 
-        for i in range(cfg.n_moves):
-            src, dst = random_move(board, rng)
-            piece = board[src]
-            tall = piece.endswith("-king") or piece.endswith("-queen")
-            log.info("move %d/%d: %s -> %s (%s, tall=%s)",
-                     i + 1, cfg.n_moves, src, dst, piece, tall)
+        if cfg.wipe_on_start:
+            # Start from a clean server-side game_state so `go` isn't continuing a
+            # prior run's position/move history.
+            log.info("wiping chess game_state")
+            await chess_svc.do_command({"wipe": True})
+        else:
+            log.info("resuming from existing chess game_state (no wipe)")
+        snap0 = await get_board_snapshot(chess_svc)
+        board = board_from_fen(str(snap0["fen"]))
 
+        skill = rng.randrange(0, 100)
+        await chess_svc.do_command({"skill": skill})
+        log.info("setting skill to %d", skill)
+
+        for i in range(cfg.n_moves):
             if cfg.manual:
-                # Home FIRST so the arm is out of the way while the user moves
-                # the piece. After the previous iteration's capture cycle, the
-                # arm is parked at the last perturbed pose — without this, the
-                # user would be reaching around it.
-                await go_home(home_switch)
-                await asyncio.to_thread(
-                    input,
-                    f"  → move {piece} from {src} to {dst}, press ENTER when done: ",
-                )
+                raise NotImplementedError("manual mode is not supported with do_go()")
             else:
-                await do_move(chess_svc, src, dst, tall)
-            board[dst] = board.pop(src)
+                src, dst = await do_go_retry(chess_svc, 1)
+                log.info("move %d/%d: %s -> %s", i + 1, cfg.n_moves, src, dst)
+                snap = await get_board_snapshot(chess_svc)
+                board = board_from_fen(str(snap["fen"]))
 
             # Either the chess module's defer goToStart ran (auto), or we
             # just homed via the switch (manual) — arm is at canonical home.
@@ -368,8 +454,6 @@ def parse_args() -> Config:
     p.add_argument("--perturb-xy-mm", type=float, default=12.0)
     p.add_argument("--perturb-z-mm", type=float, default=8.0)
     p.add_argument("--perturb-theta-deg", type=float, default=3.0)
-    p.add_argument("--seed", type=int, default=None,
-                   help="RNG seed; omit for OS entropy (logged at startup so you can reproduce)")
     p.add_argument("--upload-concurrency", type=int, default=10)
     p.add_argument("--upload-every-n-moves", type=int, default=5,
                    help="capture N moves, then pause to drain the buffer, then resume")
@@ -382,6 +466,8 @@ def parse_args() -> Config:
     p.add_argument("--camera-component", default="cam")
     p.add_argument("--home-switch", default="hack-pose-look-straight-down",
                    help="name of the arm-position-saver toggleswitch component used to home the arm")
+    p.add_argument("--resume", action="store_true",
+                   help="resume from the chess module's last saved game_state (skip wipe at startup)")
     args = p.parse_args()
 
     return Config(
@@ -403,7 +489,7 @@ def parse_args() -> Config:
         upload_concurrency=args.upload_concurrency,
         upload_every_n_moves=args.upload_every_n_moves,
         manual=args.manual,
-        seed=args.seed,
+        wipe_on_start=not args.resume,
     )
 
 
