@@ -289,7 +289,7 @@ func (s *viamChessChess) myGrab(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	res, err := s.arm.DoCommand(ctx, map[string]interface{}{"get_gripper": true})
 	if err != nil {
