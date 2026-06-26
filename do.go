@@ -18,6 +18,29 @@ type MoveCmd struct {
 	N        int
 }
 
+// hoverPickedCenterCmd is the payload of the "hover_over_picked_center" doCommand.
+// For each square in Squares the arm hovers 20mm above the estimated pickup
+// center of the piece there, dwells DwellSeconds (so you can eyeball it), then
+// moves to the next. Raises to home between squares to clear taller pieces.
+type hoverPickedCenterCmd struct {
+	Squares      []string // required, e.g. ["e4","d5"]
+	Method       string   // "top_n" | "top_band" | "highest_midpoint"; empty = config default
+	N            int      // for top_n; <=0 = default 5
+	BandMM       float64  `mapstructure:"band_mm"`       // for top_band; <=0 = default 20mm
+	DwellSeconds float64  `mapstructure:"dwell_seconds"` // dwell per square; <=0 = default 10s
+
+	// SquareInset overrides the per-square segmentation inset (px) for this
+	// capture. nil = the piece-finder's configured inset. Negative enlarges the
+	// bounds (capture more of a leaning piece top); positive shrinks.
+	SquareInset *float64 `mapstructure:"square_inset"`
+	// FilterBlob keeps only the most central, biggest blob of points per square
+	// before estimating the center — useful with an enlarged bound, which may
+	// pull in a neighbouring piece's points.
+	FilterBlob bool `mapstructure:"filter_blob"`
+	// ClusterRadiusMM is the XY connectivity radius for FilterBlob; <=0 = 8mm.
+	ClusterRadiusMM float64 `mapstructure:"cluster_radius_mm"`
+}
+
 type cmdStruct struct {
 	Move            MoveCmd
 	Go              int
@@ -31,8 +54,10 @@ type cmdStruct struct {
 	BoardSnapshot   bool   `mapstructure:"board-snapshot"`
 	GameEvents      bool   `mapstructure:"game-events"`
 	CompanionConfig bool   `mapstructure:"companion-config"`
-	Auto            *bool    // pointer so explicit false is distinguishable from absent
-	SetAnnounce     *bool    `mapstructure:"set-announce"` // pointer so explicit false is distinguishable from absent
+	Auto            *bool  // pointer so explicit false is distinguishable from absent
+	SetAnnounce     *bool  `mapstructure:"set-announce"` // pointer so explicit false is distinguishable from absent
+
+	HoverPickedCenter *hoverPickedCenterCmd `mapstructure:"hover_over_picked_center"`
 }
 
 func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interface{}) (map[string]interface{}, error) {
@@ -207,6 +232,10 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 		return map[string]interface{}{"center": center}, nil
 	}
 
+	if cmd.HoverPickedCenter != nil {
+		return s.hoverOverPickedCenter(ctx, cmd.HoverPickedCenter)
+	}
+
 	var videoFrom *time.Time
 	var videoTags []string
 	defer func() {
@@ -283,6 +312,157 @@ func (s *viamChessChess) DoCommand(ctx context.Context, cmdMap map[string]interf
 	}
 
 	return nil, fmt.Errorf("bad cmd %v", cmdMap)
+}
+
+const (
+	defaultHoverDwellSeconds = 10.0
+	hoverApproachMM          = 100.0 // phase 1: hover 10cm above the picked center
+	hoverFinalMM             = 30.0  // phase 2: descend straight down to 3cm above the highest point
+	defaultClusterRadiusMM   = 8.0   // FilterBlob XY connectivity radius
+)
+
+// hoverOverPickedCenter captures the board once, then for each square estimates
+// the pickup center of the piece there (using the chosen method) and descends in
+// two phases — approach 10cm above the picked center, then straight down to 3cm
+// above the highest point — dwelling there so you can eyeball the alignment
+// before moving on. Raises to home between squares to clear taller pieces.
+// Invalid or empty squares are skipped (recorded in the result) rather than
+// aborting the sweep. Pure observation — no game-state change.
+func (s *viamChessChess) hoverOverPickedCenter(ctx context.Context, c *hoverPickedCenterCmd) (map[string]interface{}, error) {
+	if len(c.Squares) == 0 {
+		return nil, fmt.Errorf("hover_over_picked_center: squares is required (e.g. [\"e4\",\"d5\"])")
+	}
+
+	method := s.conf.pickupCenterMethod()
+	if c.Method != "" {
+		method = pickupCenterMethod(c.Method)
+	}
+	switch method {
+	case methodTopN, methodTopBand, methodHighestMidpoint:
+	default:
+		return nil, fmt.Errorf("hover_over_picked_center: unknown method %q (want top_n|top_band|highest_midpoint)", c.Method)
+	}
+
+	n := c.N
+	if n <= 0 {
+		n = defaultTopN
+	}
+	bandMM := c.BandMM
+	if bandMM <= 0 {
+		bandMM = defaultTopBandMM
+	}
+	dwell := time.Duration(defaultHoverDwellSeconds * float64(time.Second))
+	if c.DwellSeconds > 0 {
+		dwell = time.Duration(c.DwellSeconds * float64(time.Second))
+	}
+	clusterRadius := c.ClusterRadiusMM
+	if clusterRadius <= 0 {
+		clusterRadius = defaultClusterRadiusMM
+	}
+
+	// Per-call square-inset override flows to the piece finder via extra.
+	var extra map[string]interface{}
+	if c.SquareInset != nil {
+		extra = map[string]interface{}{"square_inset": *c.SquareInset}
+	}
+
+	if err := s.goToStart(ctx); err != nil {
+		return nil, err
+	}
+
+	all, err := s.pieceFinder.CaptureAllFromCamera(ctx, "", viscapture.CaptureOptions{}, extra)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]interface{}, 0, len(c.Squares))
+	firstHover := true
+	for _, raw := range c.Squares {
+		sq := strings.TrimSpace(raw)
+		if len(sq) != 2 || sq[0] < 'a' || sq[0] > 'h' || sq[1] < '1' || sq[1] > '8' {
+			s.logger.Warnf("hover_over_picked_center: skipping invalid square %q", raw)
+			results = append(results, map[string]interface{}{"square": raw, "error": "invalid square (want a1..h8)"})
+			continue
+		}
+
+		o := s.findObject(all, sq)
+		if o == nil {
+			s.logger.Warnf("hover_over_picked_center: no object found for %s; skipping", sq)
+			results = append(results, map[string]interface{}{"square": sq, "error": "no object found"})
+			continue
+		}
+		if strings.HasSuffix(o.Geometry.Label(), "-0") {
+			s.logger.Warnf("hover_over_picked_center: %s looks empty (no piece detected); hovering over board center", sq)
+		}
+
+		blobKept, blobTotal := 0, 0
+		if c.FilterBlob {
+			o, blobKept, blobTotal = filterCentralBlob(o, clusterRadius, s.logger)
+		}
+
+		// Raise to home between hovers so we don't drag the gripper across taller
+		// pieces; the first hover relies on the goToStart above.
+		if !firstHover {
+			if err := s.goToStart(ctx); err != nil {
+				return nil, err
+			}
+		}
+		firstHover = false
+
+		center := GetPickupCenterWith(o, method, n, bandMM)
+
+		// Two-phase descent with a strictly vertical gripper. Approach 10cm above
+		// the picked center, close the gripper, then drop straight down (same XY)
+		// to 3cm above the highest point.
+		approach := center
+		approach.Z += hoverApproachMM
+		if err := s.moveGripperVertical(ctx, approach); err != nil {
+			return nil, err
+		}
+
+		if _, err := s.gripper.Grab(ctx, nil); err != nil {
+			return nil, err
+		}
+
+		hoverPos := center
+		hoverPos.Z += hoverFinalMM
+		if err := s.moveGripperVertical(ctx, hoverPos); err != nil {
+			return nil, err
+		}
+
+		s.logger.Infof("hover_over_picked_center: square=%s method=%s center=%v approach_z=%.1f hover_z=%.1f (dwell %s)", sq, method, center, approach.Z, hoverPos.Z, dwell)
+		res := map[string]interface{}{
+			"square":     sq,
+			"center":     map[string]interface{}{"x": center.X, "y": center.Y, "z": center.Z},
+			"approach_z": approach.Z,
+			"hover_z":    hoverPos.Z,
+		}
+		if c.FilterBlob {
+			res["blob_points"] = blobKept
+			res["total_points"] = blobTotal
+		}
+		results = append(results, res)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(dwell):
+		}
+	}
+
+	out := map[string]interface{}{
+		"method":        string(method),
+		"dwell_seconds": dwell.Seconds(),
+		"filter_blob":   c.FilterBlob,
+		"results":       results,
+	}
+	if c.SquareInset != nil {
+		out["square_inset"] = *c.SquareInset
+	}
+	if c.FilterBlob {
+		out["cluster_radius_mm"] = clusterRadius
+	}
+	return out, nil
 }
 
 const videoSaverTimeFormat = "2006-01-02_15-04-05"

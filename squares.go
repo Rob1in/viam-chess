@@ -81,7 +81,7 @@ func (s *viamChessChess) getCenterFor(data viscapture.VisCapture, pos string, th
 		return r3.Vector{}, fmt.Errorf("can't find object for: %s", pos)
 	}
 
-	return GetPickupCenter(o), nil
+	return GetPickupCenterWith(o, s.conf.pickupCenterMethod(), defaultTopN, defaultTopBandMM), nil
 }
 
 func (s *viamChessChess) allSquaresCached() bool {

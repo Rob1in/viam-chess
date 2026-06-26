@@ -23,6 +23,11 @@ type ChessConfig struct {
 
 	CaptureDir string // for vla data
 
+	// PickupCenterMethod selects the XY pickup-center estimator used when
+	// grabbing: "top_n", "top_band" (default), or "highest_midpoint".
+	// See GetPickupCenterWith. Empty = "top_band".
+	PickupCenterMethod string `json:"pickup-center-method,omitempty"`
+
 	GrabZ             float64 `json:"grab-z"`              // mm, default 40
 	GrabZTall         float64 `json:"grab-z-tall"`         // mm, default 80 (king/queen)
 	GraveyardSpacingY float64 `json:"graveyard-spacing-y"` // mm/row, default 80
@@ -64,6 +69,13 @@ func (cfg *ChessConfig) engineMillis() int {
 		return 10
 	}
 	return cfg.EngineMillis
+}
+
+func (cfg *ChessConfig) pickupCenterMethod() pickupCenterMethod {
+	if cfg.PickupCenterMethod == "" {
+		return defaultPickupCenterMethod
+	}
+	return pickupCenterMethod(cfg.PickupCenterMethod)
 }
 
 func (cfg *ChessConfig) grabZ() float64 {

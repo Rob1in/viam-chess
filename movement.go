@@ -302,6 +302,26 @@ func (s *viamChessChess) moveGripperWithTheta(ctx context.Context, p r3.Vector, 
 		orientation.OX += .2
 	}
 
+	return s.moveGripperToPose(ctx, p, orientation)
+}
+
+// moveGripperVertical moves the gripper to p pointing straight down (OZ:-1, no
+// OX/OY tilt), so it stays vertical regardless of reach. Far squares that the
+// tilted moveGripper would reach may fail to plan here — that's the tradeoff
+// for a strictly vertical descent.
+func (s *viamChessChess) moveGripperVertical(ctx context.Context, p r3.Vector) error {
+	ctx, span := trace.StartSpan(ctx, "moveGripperVertical")
+	defer span.End()
+
+	orientation := &spatialmath.OrientationVectorDegrees{
+		OZ:    -1,
+		Theta: s.startPose.Pose().Orientation().OrientationVectorDegrees().Theta - 180,
+	}
+
+	return s.moveGripperToPose(ctx, p, orientation)
+}
+
+func (s *viamChessChess) moveGripperToPose(ctx context.Context, p r3.Vector, orientation *spatialmath.OrientationVectorDegrees) error {
 	myPose := spatialmath.NewPose(p, orientation)
 	myConstraints := &motionplan.Constraints{}
 	myConstraints.AddOrientationConstraint(motionplan.OrientationConstraint{OrientationToleranceDegs: 45})

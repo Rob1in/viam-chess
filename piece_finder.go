@@ -1115,8 +1115,20 @@ func (bc *PieceFinder) CaptureAllFromCamera(ctx context.Context, cameraName stri
 		return ret, err
 	}
 
+	cc := bc.conf.toClassifyConfig()
+	// Per-call square-inset override (e.g. from the hover_over_picked_center
+	// doCommand). Negative values enlarge the per-square bounds; positive shrink.
+	if extra != nil {
+		if v, ok := extra["square_inset"]; ok {
+			if f, ok := asFloat64(v); ok {
+				cc.SquareInset = f
+				bc.logger.Debugf("square_inset override: %.1f px", f)
+			}
+		}
+	}
+
 	_, span2 = trace.StartSpan(ctx, "PieceFinder::CaptureAllFromCamera::findBoardAndPieces")
-	squares, err := findBoardAndPieces(ctx, ret.Image, pc, bc.props, bc.logger, bc.conf.toClassifyConfig())
+	squares, err := findBoardAndPieces(ctx, ret.Image, pc, bc.props, bc.logger, cc)
 	span2.End()
 	if err != nil {
 		if extra != nil && extra["debug"] == true {
@@ -1216,7 +1228,36 @@ func (bc *PieceFinder) CaptureAllFromCamera(ctx context.Context, cameraName stri
 	return ret, nil
 }
 
+// pickupCenterMethod selects how the XY grab point is estimated from a piece's
+// point cloud. Z is always the highest point of the cloud.
+type pickupCenterMethod string
+
+const (
+	// methodTopN averages the XY of the n highest points.
+	methodTopN pickupCenterMethod = "top_n"
+	// methodTopBand averages the XY of all points within bandMM of the highest point.
+	methodTopBand pickupCenterMethod = "top_band"
+	// methodHighestMidpoint is the original estimator: midpoint of the metadata
+	// center and the single highest point.
+	methodHighestMidpoint pickupCenterMethod = "highest_midpoint"
+)
+
+const (
+	defaultPickupCenterMethod = methodTopBand
+	defaultTopN               = 5
+	defaultTopBandMM          = 20.0
+)
+
+// GetPickupCenter returns the grab point using the default estimator. Used by the
+// piece-finder debug marker and as the production fallback.
 func GetPickupCenter(o *viz.Object) r3.Vector {
+	return GetPickupCenterWith(o, defaultPickupCenterMethod, defaultTopN, defaultTopBandMM)
+}
+
+// GetPickupCenterWith returns the grab point for a piece's point cloud using the
+// chosen estimator. n applies to methodTopN; bandMM applies to methodTopBand.
+// Empty squares (label suffix "-0") return the plain metadata center.
+func GetPickupCenterWith(o *viz.Object, method pickupCenterMethod, n int, bandMM float64) r3.Vector {
 	md := o.MetaData()
 	center := md.Center()
 
@@ -1224,45 +1265,60 @@ func GetPickupCenter(o *viz.Object) r3.Vector {
 		return center
 	}
 
-	// Old: avg of highest point and center. 
-	// high := touch.PCFindHighestInRegion(o, image.Rect(-1000, -1000, 1000, 1000))
-	// return r3.Vector{
-	// 	X: (center.X + high.X) / 2,
-	// 	Y: (center.Y + high.Y) / 2,
-	// 	Z: high.Z,
-	// }
+	switch method {
+	case methodTopN:
+		return pickupCenterTopN(o, center, n)
+	case methodHighestMidpoint:
+		return pickupCenterHighestMidpoint(o, center)
+	default: // methodTopBand
+		return pickupCenterTopBand(o, center, bandMM)
+	}
+}
 
-	// // Option 1: Collect all points, sort by Z descending, average the top 5 for XY.
-	// type pt struct{ x, y, z float64 }
-	// var pts []pt
-	// o.Iterate(0, 0, func(p r3.Vector, d pointcloud.Data) bool {
-	// 	pts = append(pts, pt{p.X, p.Y, p.Z})
-	// 	return true
-	// })
-	// sort.Slice(pts, func(i, j int) bool { return pts[i].z > pts[j].z })
-
-	// n := 5
-	// if len(pts) < n {
-	// 	n = len(pts)
-	// }
-	// if n == 0 {
-	// 	return center
-	// }
-
-	// var sumX, sumY float64
-	// for _, p := range pts[:n] {
-	// 	sumX += p.x
-	// 	sumY += p.y
-	// }
-	// return r3.Vector{X: sumX / float64(n), Y: sumY / float64(n), Z: pts[0].z}
-
-	// Option 2: Average XY of all points within 20mm of the highest point
+// pickupCenterHighestMidpoint: midpoint of the metadata center and the single
+// highest point; Z = highest.
+func pickupCenterHighestMidpoint(o *viz.Object, center r3.Vector) r3.Vector {
 	high := touch.PCFindHighestInRegion(o, image.Rect(-1000, -1000, 1000, 1000))
-	const topBandMM = 20.0
+	return r3.Vector{
+		X: (center.X + high.X) / 2,
+		Y: (center.Y + high.Y) / 2,
+		Z: high.Z,
+	}
+}
+
+// pickupCenterTopN: average XY of the n highest points; Z = highest.
+func pickupCenterTopN(o *viz.Object, center r3.Vector, n int) r3.Vector {
+	type pt struct{ x, y, z float64 }
+	var pts []pt
+	o.Iterate(0, 0, func(p r3.Vector, d pointcloud.Data) bool {
+		pts = append(pts, pt{p.X, p.Y, p.Z})
+		return true
+	})
+	sort.Slice(pts, func(i, j int) bool { return pts[i].z > pts[j].z })
+
+	if n > len(pts) {
+		n = len(pts)
+	}
+	if n == 0 {
+		return center
+	}
+
+	var sumX, sumY float64
+	for _, p := range pts[:n] {
+		sumX += p.x
+		sumY += p.y
+	}
+	return r3.Vector{X: sumX / float64(n), Y: sumY / float64(n), Z: pts[0].z}
+}
+
+// pickupCenterTopBand: average XY of all points within bandMM of the highest
+// point; Z = highest.
+func pickupCenterTopBand(o *viz.Object, center r3.Vector, bandMM float64) r3.Vector {
+	high := touch.PCFindHighestInRegion(o, image.Rect(-1000, -1000, 1000, 1000))
 	var sumX, sumY float64
 	var count int
 	o.Iterate(0, 0, func(p r3.Vector, d pointcloud.Data) bool {
-		if p.Z >= high.Z-topBandMM {
+		if p.Z >= high.Z-bandMM {
 			sumX += p.X
 			sumY += p.Y
 			count++
@@ -1273,6 +1329,142 @@ func GetPickupCenter(o *viz.Object) r3.Vector {
 		return center
 	}
 	return r3.Vector{X: sumX / float64(count), Y: sumY / float64(count), Z: high.Z}
+}
+
+// asFloat64 coerces an interface{} (typically from a doCommand `extra` map,
+// where JSON/proto numbers arrive as float64) to a float64.
+func asFloat64(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// centralBlobScaleMM controls how sharply filterCentralBlob discounts a cluster
+// for being off-center: a cluster centroid this far (mm) from the square center
+// halves its effective size in the score. ~20mm ≈ half a square.
+const centralBlobScaleMM = 20.0
+
+// filterCentralBlob keeps only the most central, biggest blob of points in o,
+// discarding stray points (e.g. a neighbouring piece leaning into an enlarged
+// square bound). Points are clustered by XY proximity via grid connected-
+// components (cell size radiusMM, 8-connectivity); each cluster is scored as
+// count / (1 + (dist/centralBlobScaleMM)^2), where dist is its centroid's XY
+// distance from the square center. The top-scoring cluster's points become the
+// returned object. Returns o unchanged (and kept==total) for empty squares
+// ("-0"), radiusMM <= 0, or degenerate input. The second/third return values
+// are the kept and total point counts.
+func filterCentralBlob(o *viz.Object, radiusMM float64, logger logging.Logger) (*viz.Object, int, int) {
+	md := o.MetaData()
+	center := md.Center()
+
+	type ptd struct {
+		p r3.Vector
+		d pointcloud.Data
+	}
+	var pts []ptd
+	o.Iterate(0, 0, func(p r3.Vector, d pointcloud.Data) bool {
+		pts = append(pts, ptd{p, d})
+		return true
+	})
+	total := len(pts)
+	if radiusMM <= 0 || total == 0 || strings.HasSuffix(o.Geometry.Label(), "-0") {
+		return o, total, total
+	}
+
+	type cell struct{ cx, cy int }
+	cellOf := func(p r3.Vector) cell {
+		return cell{int(math.Floor(p.X / radiusMM)), int(math.Floor(p.Y / radiusMM))}
+	}
+
+	// Union-find over occupied grid cells.
+	parent := map[cell]cell{}
+	var find func(c cell) cell
+	find = func(c cell) cell {
+		root, ok := parent[c]
+		if !ok {
+			parent[c] = c
+			return c
+		}
+		if root == c {
+			return c
+		}
+		r := find(root)
+		parent[c] = r
+		return r
+	}
+	for i := range pts {
+		find(cellOf(pts[i].p)) // register cell
+	}
+	for c := range parent {
+		for dx := -1; dx <= 1; dx++ {
+			for dy := -1; dy <= 1; dy++ {
+				if dx == 0 && dy == 0 {
+					continue
+				}
+				n := cell{c.cx + dx, c.cy + dy}
+				if _, ok := parent[n]; ok {
+					if ra, rb := find(c), find(n); ra != rb {
+						parent[ra] = rb
+					}
+				}
+			}
+		}
+	}
+
+	type blob struct {
+		count      int
+		sumX, sumY float64
+		idx        []int
+	}
+	clusters := map[cell]*blob{}
+	for i := range pts {
+		root := find(cellOf(pts[i].p))
+		b := clusters[root]
+		if b == nil {
+			b = &blob{}
+			clusters[root] = b
+		}
+		b.count++
+		b.sumX += pts[i].p.X
+		b.sumY += pts[i].p.Y
+		b.idx = append(b.idx, i)
+	}
+
+	var best *blob
+	var bestScore float64
+	for _, b := range clusters {
+		cx := b.sumX / float64(b.count)
+		cy := b.sumY / float64(b.count)
+		dx, dy := cx-center.X, cy-center.Y
+		distSq := dx*dx + dy*dy
+		score := float64(b.count) / (1 + distSq/(centralBlobScaleMM*centralBlobScaleMM))
+		if best == nil || score > bestScore {
+			best, bestScore = b, score
+		}
+	}
+	if best == nil {
+		return o, total, total
+	}
+
+	filtered := pointcloud.NewBasicEmpty()
+	for _, i := range best.idx {
+		filtered.Set(pts[i].p, pts[i].d)
+	}
+	newObj, err := viz.NewObjectWithLabel(filtered, o.Geometry.Label(), nil)
+	if err != nil {
+		logger.Warnf("filterCentralBlob: rebuild failed: %v; using unfiltered cloud", err)
+		return o, total, total
+	}
+	return newObj, best.count, total
 }
 
 func (bc *PieceFinder) GetProperties(ctx context.Context, extra map[string]interface{}) (*vision.Properties, error) {
